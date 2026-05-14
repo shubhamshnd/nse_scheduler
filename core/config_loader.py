@@ -41,13 +41,13 @@ class _CleanFilter(logging.Filter):
 
 def load_config(path=None) -> dict:
     p = Path(path) if path else DEFAULT_CFG_PATH
-    with open(p, encoding="utf-8") as f:
+    with open(p, encoding="utf-8-sig") as f:  # utf-8-sig strips BOM if present
         return yaml.safe_load(f)
 
 
 def save_config(cfg: dict, path=None):
     p = Path(path) if path else DEFAULT_CFG_PATH
-    with open(p, "w", encoding="utf-8") as f:
+    with open(p, "w", encoding="utf-8") as f:  # plain utf-8, no BOM
         yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
 
