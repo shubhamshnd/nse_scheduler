@@ -111,4 +111,4 @@ NIFTY500_SYMBOLS = [
 
 # De-duplicate while preserving order
 _seen = set()
-NIFTY500_SYMBOLS = [s for s in NIFTY500_SYMBOLS if not (_seen.add(s) or s in _seen)]
+NIFTY500_SYMBOLS = [s for s in NIFTY500_SYMBOLS if s not in _seen and not _seen.add(s)]

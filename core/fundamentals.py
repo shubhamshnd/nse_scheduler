@@ -200,7 +200,8 @@ def screen_fundamentals(cfg: dict) -> pd.DataFrame:
             else:
                 logger.debug(f"  ✗ [{done}/{len(symbols)}] {res['symbol']:<20} → {res['reason']}")
 
-    _save_cache(results)
+    if results:  # don't persist an empty run (symbol list was bad)
+        _save_cache(results)
 
     passed = [r for r in results if r["ok"]]
     logger.info(f"Fundamentals complete: {len(passed)}/{len(results)} pass quality filters.")
