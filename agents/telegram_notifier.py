@@ -45,11 +45,22 @@ def _regime_emoji(regime: str) -> str:
 
 def _cross_emoji(state: str) -> str:
     return {
-        "GOLDEN_CROSS":        "✨",
-        "GOLDEN_CROSS_FORMING":"🟡",
-        "DEATH_CROSS":         "💀",
-        "DEATH_CROSS_FORMING": "⚠️",
+        "GOLDEN_CROSS":         "✨",
+        "GOLDEN_CROSS_FORMING": "🟡",
+        "DEATH_CROSS":          "💀",
+        "DEATH_CROSS_FORMING":  "⚠️",
     }.get(state, "⚪")
+
+
+def _fmt(val, prefix="₹", decimals=2):
+    """Format a numeric value; return '—' if None/zero."""
+    if val is None:
+        return "—"
+    try:
+        v = float(val)
+        return f"{prefix}{v:,.{decimals}f}" if prefix else f"{v:,.{decimals}f}"
+    except (TypeError, ValueError):
+        return "—"
 
 
 # ─── Scan report ─────────────────────────────────────────────────────────────
@@ -59,57 +70,142 @@ def send_scan_report(analyses: list, shortlist_df, cfg: dict, regime: dict = Non
         return
     token   = cfg["api_keys"]["telegram_bot"]
     chat_id = str(cfg["api_keys"]["telegram_chat"])
-    max_n   = cfg["telegram"].get("max_stocks_in_message", 10)
 
     import pandas as pd
     if not isinstance(shortlist_df, pd.DataFrame):
         shortlist_df = pd.DataFrame(shortlist_df)
 
     # ── Header with regime ────────────────────────────────────────────────────
-    lines = ["<b>🔍 Nifty500 Scan Report</b>",
-             f"<i>{datetime.now().strftime('%d %b %Y, %H:%M IST')}</i>"]
+    lines = [
+        "<b>🔍 Nifty500 Scan Report</b>",
+        f"<i>{datetime.now().strftime('%d %b %Y, %H:%M IST')}</i>",
+    ]
 
     if regime and regime.get("regime", "UNKNOWN") != "UNKNOWN":
-        r = regime["regime"]
-        close  = regime.get("nifty50_close", 0)
-        pct    = regime.get("pct_above_ema200", 0)
-        dd     = regime.get("drawdown_pct", 0)
+        r     = regime["regime"]
+        close = regime.get("nifty50_close", 0)
+        pct   = regime.get("pct_above_ema200", 0)
+        dd    = regime.get("drawdown_pct", 0)
         lines.append(
             f"{_regime_emoji(r)} Market: <b>{r}</b> | "
-            f"Nifty50 ₹{close:,.0f} ({pct:+.1f}% vs EMA200) | "
-            f"DD {dd:.1f}%"
+            f"Nifty50 ₹{close:,.0f} ({pct:+.1f}% vs EMA200) | DD {dd:.1f}%"
         )
 
+    buy_n   = sum(1 for a in analyses if a.get("recommendation") == "BUY")
+    hold_n  = sum(1 for a in analyses if a.get("recommendation") == "HOLD")
+    avoid_n = sum(1 for a in analyses if a.get("recommendation") == "AVOID")
     lines += [
-        f"Screened: {len(shortlist_df)} stocks | AI analysed: {len(analyses)}",
+        f"Screened: <b>{len(shortlist_df)}</b> stocks | AI: {len(analyses)} analysed",
+        f"🟢 BUY: {buy_n}  🟡 HOLD: {hold_n}  🔴 AVOID: {avoid_n}",
         "─────────────────────────",
     ]
 
-    for a in analyses[:max_n]:
+    # ── All stocks (no truncation) ────────────────────────────────────────────
+    for a in analyses:
         sym       = a.get("symbol", "?")
         rec       = a.get("recommendation", "HOLD")
         sentiment = a.get("sentiment", "NEUTRAL")
         conf      = a.get("confidence", 0)
-        summary   = a.get("summary", "")[:150]
+        summary   = (a.get("summary") or "")[:200]
 
         row       = shortlist_df[shortlist_df["symbol"] == sym]
         close_str = f"₹{row['last_close'].values[0]:.2f}"  if not row.empty else ""
         mom_str   = f"{row['momentum_ret'].values[0]:+.1f}%" if not row.empty else ""
-        cross     = row["crossover_state"].values[0]         if not row.empty and "crossover_state" in row.columns else ""
+        cross     = row["crossover_state"].values[0] if (not row.empty and "crossover_state" in row.columns) else ""
 
-        cross_tag = f" {_cross_emoji(cross)}{cross}" if cross else ""
+        cross_tag   = f" {_cross_emoji(cross)}{cross.replace('_',' ')}" if cross else ""
+        sharpe_val  = row["sharpe_momentum"].values[0] if (not row.empty and "sharpe_momentum" in row.columns) else None
+        sharpe_str  = f" | Sharpe {sharpe_val:+.2f}" if sharpe_val is not None else ""
+
+        # Trade levels (Groq-refined or technical fallback)
+        el  = _fmt(a.get("entry_low"))
+        eh  = _fmt(a.get("entry_high"))
+        sl  = _fmt(a.get("stop_loss"))
+        t1  = _fmt(a.get("target_1"))
+        t2  = _fmt(a.get("target_2"))
+        rr  = a.get("risk_reward")
+        hd  = a.get("hold_days_est")
+        psn = (a.get("position_size_note") or "").strip()
+
+        rr_str = f" | R:R {rr:.1f}x" if rr else ""
+        hd_str = f"Hold ~{hd}d" if hd else ""
 
         lines.append(
-            f"{_rec_emoji(rec)} <b>{sym.split('.')[0]}</b> {close_str} ({mom_str}){cross_tag}\n"
-            f"   <b>{rec}</b> | Sentiment: {sentiment} | Conf: {conf:.0%}\n"
-            f"   <i>{summary}</i>"
+            f"\n{_rec_emoji(rec)} <b>{sym.split('.')[0]}</b> {close_str} "
+            f"({mom_str}){sharpe_str}{cross_tag}\n"
+            f"  <b>{rec}</b> | {sentiment} | Conf: {conf:.0%}\n"
+            f"  Entry: <b>{el}–{eh}</b> | SL: {sl}\n"
+            f"  T1: {t1} | T2: {t2}{rr_str}"
         )
+        if hd_str:
+            lines.append(f"  {hd_str}")
+        if psn and psn != "N/A":
+            lines.append(f"  💼 {psn}")
+        if summary:
+            lines.append(f"  <i>{summary}</i>")
 
-    if len(analyses) > max_n:
-        lines.append(f"\n…and {len(analyses) - max_n} more. View dashboard for full report.")
+        kp = a.get("key_positives") or []
+        kr = a.get("key_risks") or []
+        if kp:
+            lines.append("  ✅ " + " · ".join(kp[:3]))
+        if kr:
+            lines.append("  ⚠️ " + " · ".join(kr[:3]))
 
     _send(token, chat_id, "\n".join(lines))
-    logger.info("Telegram scan report sent.")
+    logger.info(f"Telegram scan report sent ({len(analyses)} stocks, no truncation).")
+
+
+# ─── Price entry alert ─────────────────────────────────────────────────────────
+
+def send_price_alert(alerts: list, cfg: dict):
+    """
+    Sends a Telegram alert when a stock's current price enters its entry zone.
+    Called by price_watcher.check_entry_zones().
+    """
+    if not cfg.get("telegram", {}).get("enabled"):
+        return
+    if not alerts:
+        return
+
+    token   = cfg["api_keys"]["telegram_bot"]
+    chat_id = str(cfg["api_keys"]["telegram_chat"])
+
+    lines = [
+        "<b>📍 Entry Zone Alert</b>",
+        f"<i>{datetime.now().strftime('%d %b %Y, %H:%M IST')}</i>",
+        "─────────────────────────",
+    ]
+
+    for a in alerts:
+        sym   = a["symbol"].split(".")[0]
+        price = a["price"]
+        el    = a["entry_low"]
+        eh    = a["entry_high"]
+        sl    = _fmt(a.get("stop_loss"))
+        t1    = _fmt(a.get("target_1"))
+        t2    = _fmt(a.get("target_2"))
+        rr    = a.get("risk_reward")
+        hd    = a.get("hold_days_est")
+        conf  = a.get("confidence", 0)
+        psn   = (a.get("position_size_note") or "").strip()
+        summ  = (a.get("summary") or "")[:180]
+
+        rr_str = f" | R:R {rr:.1f}x" if rr else ""
+        hd_str = f" | Hold ~{hd}d" if hd else ""
+
+        lines.append(
+            f"\n🎯 <b>{sym}</b> ₹{price:.2f} — IN ENTRY ZONE\n"
+            f"  Zone: ₹{el:.2f}–₹{eh:.2f} | SL: {sl}\n"
+            f"  T1: {t1} | T2: {t2}{rr_str}{hd_str}\n"
+            f"  Conf: {conf:.0%}"
+        )
+        if psn and psn != "N/A":
+            lines.append(f"  💼 {psn}")
+        if summ:
+            lines.append(f"  <i>{summ}</i>")
+
+    _send(token, chat_id, "\n".join(lines))
+    logger.info(f"Telegram price entry alert sent ({len(alerts)} stock(s)).")
 
 
 # ─── Earnings alert ───────────────────────────────────────────────────────────
@@ -130,7 +226,7 @@ def send_earnings_alert(earnings_data: list, cfg: dict):
         "─────────────────────────",
     ]
     for e in soon:
-        br  = f"{e['beat_rate_pct']:.0f}%"   if e.get("beat_rate_pct")   is not None else "N/A"
+        br  = f"{e['beat_rate_pct']:.0f}%"    if e.get("beat_rate_pct")   is not None else "N/A"
         avg = f"{e['avg_surprise_pct']:+.1f}%" if e.get("avg_surprise_pct") is not None else "N/A"
         lines.append(
             f"📌 <b>{e['symbol']}</b> — {e['next_earnings']}\n"

@@ -269,6 +269,59 @@ const CFG = {{ cfg | tojson }};
     </div>
   </div>
 
+  <!-- ── 4b. Market Regime & Concentration ────────────────── -->
+  <div class="accordion-item bg-transparent border-secondary border-opacity-25">
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed bg-dark text-light" type="button"
+              data-bs-toggle="collapse" data-bs-target="#sec-regime">
+        <i class="bi bi-activity me-2 text-warning"></i>Market Regime &amp; Concentration
+      </button>
+    </h2>
+    <div id="sec-regime" class="accordion-collapse collapse">
+      <div class="accordion-body">
+        {% set rc = cfg.screening.get('regime_filter', {}) if cfg.screening else {} %}
+        <p class="small text-secondary mb-3">
+          Checks Nifty50 vs its EMA200 before screening. In BEAR markets the shortlist
+          shrinks automatically to reduce exposure.
+        </p>
+        <div class="row g-3">
+          <div class="col-12">
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" id="rf-enabled"
+                     {% if rc.get('enabled', True) %}checked{% endif %}>
+              <label class="form-check-label small" for="rf-enabled">
+                Enable regime filter (reduce shortlist when Nifty50 &lt; EMA200)
+              </label>
+            </div>
+          </div>
+          <div class="col-sm-6 col-lg-4">
+            <label class="form-label small text-secondary">Bear Market Shortlist Size</label>
+            <input type="number" id="rf-bearsize" min="1" max="20" step="1"
+                   class="form-control form-control-sm bg-dark text-light border-secondary"
+                   value="{{ rc.get('bear_shortlist_size', 5) }}">
+            <div class="form-text small">Shortlist shrinks to this when market is bearish</div>
+          </div>
+          <div class="col-sm-6 col-lg-4">
+            <label class="form-label small text-secondary">Sector Cap (max stocks/sector)</label>
+            <input type="number" id="sc-cap" min="1" max="10" step="1"
+                   class="form-control form-control-sm bg-dark text-light border-secondary"
+                   value="{{ (cfg.screening.sector_cap if cfg.screening and cfg.screening.sector_cap else 3) }}">
+            <div class="form-text small">Prevents metals/IT/banks dominating the shortlist</div>
+          </div>
+          <div class="col-12">
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" id="t-goldencross"
+                     {% if cfg.screening and cfg.screening.get('technical',{}).get('require_golden_cross') %}checked{% endif %}>
+              <label class="form-check-label small" for="t-goldencross">
+                Require Golden Cross (EMA50 &gt; EMA200) — stricter momentum confirmation
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ── 5. News ───────────────────────────────────────────── -->
   <div class="accordion-item bg-transparent border-secondary border-opacity-25">
     <h2 class="accordion-header">
@@ -349,6 +402,57 @@ const CFG = {{ cfg | tojson }};
     </div>
   </div>
 
+  <!-- ── 6b. Crossover Alerts & Price Watcher ─────────────── -->
+  <div class="accordion-item bg-transparent border-secondary border-opacity-25">
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed bg-dark text-light" type="button"
+              data-bs-toggle="collapse" data-bs-target="#sec-cross">
+        <i class="bi bi-lightning-charge me-2 text-warning"></i>Crossover Alerts &amp; Price Watcher
+      </button>
+    </h2>
+    <div id="sec-cross" class="accordion-collapse collapse">
+      <div class="accordion-body">
+        {% set cx = cfg.get('crossover', {}) if cfg else {} %}
+        {% set pw = cfg.get('price_watcher', {}) if cfg else {} %}
+        <div class="row g-3">
+          <div class="col-12">
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" id="cx-enabled"
+                     {% if cx.get('enabled', True) %}checked{% endif %}>
+              <label class="form-check-label small" for="cx-enabled">
+                Enable EMA crossover detection &amp; alerts
+              </label>
+            </div>
+          </div>
+          <div class="col-sm-6 col-lg-4">
+            <label class="form-label small text-secondary">Alert Days Ahead</label>
+            <input type="number" id="cx-days" min="3" max="30" step="1"
+                   class="form-control form-control-sm bg-dark text-light border-secondary"
+                   value="{{ cx.get('alert_days_ahead', 15) }}">
+            <div class="form-text small">Telegram alert when crossover predicted within N days</div>
+          </div>
+          <hr class="border-secondary">
+          <div class="col-12">
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" id="pw-enabled"
+                     {% if pw.get('enabled', True) %}checked{% endif %}>
+              <label class="form-check-label small" for="pw-enabled">
+                Enable intraday price watcher (alerts when price enters entry zone)
+              </label>
+            </div>
+          </div>
+          <div class="col-sm-6 col-lg-4">
+            <label class="form-label small text-secondary">Check Interval (minutes)</label>
+            <input type="number" id="pw-interval" min="5" max="60" step="5"
+                   class="form-control form-control-sm bg-dark text-light border-secondary"
+                   value="{{ pw.get('interval_minutes', 15) }}">
+            <div class="form-text small">yfinance allows ~2000 req/hr; 15 min is safe</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ── 7. Schedule ────────────────────────────────────────── -->
   <div class="accordion-item bg-transparent border-secondary border-opacity-25">
     <h2 class="accordion-header">
@@ -391,6 +495,8 @@ const CFG = {{ cfg | tojson }};
           {value:'ai_analysis',        label:'AI Analysis'},
           {value:'earnings_dashboard', label:'Earnings Dashboard'},
           {value:'telegram_report',    label:'Telegram Report'},
+          {value:'crossover_alerts',   label:'Crossover Alerts'},
+          {value:'watch_entries',      label:'Price Watcher (intraday)'},
         ];
 
         function addJobCard(name='', time='', tasks=[]) {
@@ -612,6 +718,25 @@ function collectConfig() {
   cfg.telegram.enabled              = document.getElementById('tg-enabled').checked;
   cfg.telegram.send_earnings_alerts = document.getElementById('tg-earnings').checked;
   cfg.telegram.max_stocks_in_message = parseInt(document.getElementById('tg-maxstocks').value) || 10;
+
+  // ── Regime filter & sector cap ──
+  if (!cfg.screening) cfg.screening = {};
+  if (!cfg.screening.regime_filter) cfg.screening.regime_filter = {};
+  cfg.screening.regime_filter.enabled           = document.getElementById('rf-enabled').checked;
+  cfg.screening.regime_filter.bear_shortlist_size = parseInt(document.getElementById('rf-bearsize').value) || 5;
+  cfg.screening.sector_cap                      = parseInt(document.getElementById('sc-cap').value) || 3;
+  if (!cfg.screening.technical) cfg.screening.technical = {};
+  cfg.screening.technical.require_golden_cross  = document.getElementById('t-goldencross').checked;
+
+  // ── Crossover alerts ──
+  if (!cfg.crossover) cfg.crossover = {};
+  cfg.crossover.enabled           = document.getElementById('cx-enabled').checked;
+  cfg.crossover.alert_days_ahead  = parseInt(document.getElementById('cx-days').value) || 15;
+
+  // ── Price watcher ──
+  if (!cfg.price_watcher) cfg.price_watcher = {};
+  cfg.price_watcher.enabled          = document.getElementById('pw-enabled').checked;
+  cfg.price_watcher.interval_minutes = parseInt(document.getElementById('pw-interval').value) || 15;
 
   // ── Logging ──
   if (!cfg.logging) cfg.logging = {};

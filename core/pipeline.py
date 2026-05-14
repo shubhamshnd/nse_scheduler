@@ -9,6 +9,7 @@ Task order (recommended):
   5. earnings_dashboard  — upcoming earnings, beat rates
   6. telegram_report     — push results to Telegram
   7. crossover_alerts    — EMA50/200 crossover imminence alerts (intraday task)
+  8. watch_entries       — intraday price watcher, alerts when price hits entry zone
 """
 
 import json
@@ -244,6 +245,13 @@ def run_tasks(task_list: list, cfg: dict) -> dict:
                     logger.info("  No imminent crossovers in current shortlist.")
 
                 status[task] = {"ok": True, "alerts": len(alerts)}
+
+            # ── 8. Price watcher ──────────────────────────────────────────────
+            elif task == "watch_entries":
+                logger.info("━━ Task: watch_entries (intraday entry zone check)")
+                from core.price_watcher import check_entry_zones
+                n_alerts = check_entry_zones(cfg)
+                status[task] = {"ok": True, "alerts_sent": n_alerts}
 
             else:
                 logger.warning(f"Unknown task: {task}")

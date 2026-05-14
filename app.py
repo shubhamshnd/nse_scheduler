@@ -170,6 +170,7 @@ def run_task(task: str):
         "scan_only":        ["screen", "news", "ai_analysis"],
         "full_scan":        ["fundamentals", "screen", "news", "ai_analysis"],
         "crossover_alerts": ["crossover_alerts"],
+        "watch_entries":    ["watch_entries"],
     }
     tasks = allowed.get(task)
     if not tasks:

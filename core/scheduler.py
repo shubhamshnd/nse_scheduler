@@ -8,6 +8,7 @@ from datetime import datetime
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron         import CronTrigger
+from apscheduler.triggers.interval     import IntervalTrigger
 import pytz
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,20 @@ def init_scheduler(cfg: dict, config_path: str) -> BackgroundScheduler:
             )
             logger.info(f"Scheduled job '{name}' at {time_str} {tz_name}: {tasks}")
 
+    # ── Price watcher interval job ────────────────────────────────────────────
+    pw_cfg = cfg.get("price_watcher", {})
+    if pw_cfg.get("enabled", False):
+        interval_min = int(pw_cfg.get("interval_minutes", 15))
+        _scheduler.add_job(
+            _make_job_fn(["watch_entries"], config_path),
+            trigger=IntervalTrigger(minutes=interval_min, timezone=tz),
+            id="price_watcher",
+            name=f"price_watcher (every {interval_min}min)",
+            replace_existing=True,
+            misfire_grace_time=60,
+        )
+        logger.info(f"Price watcher scheduled every {interval_min}min (market hours check built-in).")
+
     _scheduler.start()
     logger.info("Scheduler started.")
     return _scheduler
@@ -95,3 +110,16 @@ def reload_schedule(cfg: dict, config_path: str):
                     id=name, name=name, replace_existing=True, misfire_grace_time=300,
                 )
                 logger.info(f"Re-scheduled '{name}' at {time_str}")
+
+        pw_cfg = cfg.get("price_watcher", {})
+        if pw_cfg.get("enabled", False):
+            interval_min = int(pw_cfg.get("interval_minutes", 15))
+            _scheduler.add_job(
+                _make_job_fn(["watch_entries"], config_path),
+                trigger=IntervalTrigger(minutes=interval_min, timezone=tz),
+                id="price_watcher",
+                name=f"price_watcher (every {interval_min}min)",
+                replace_existing=True,
+                misfire_grace_time=60,
+            )
+            logger.info(f"Price watcher re-scheduled every {interval_min}min.")

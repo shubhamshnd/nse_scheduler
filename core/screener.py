@@ -112,6 +112,71 @@ def _atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
     return tr.rolling(period).mean()
 
 
+# ─── Entry / Exit / Hold calculations ───────────────────────────────────────
+
+def _entry_exit_calc(close: pd.Series, atr: float, ema50: float, ema200: float) -> dict:
+    """
+    Compute technically-derived entry zone, stop loss, targets, and hold estimate.
+
+    Methodology (from professional swing-trading practice):
+      Entry zone : current price down to max(EMA50, Fib 61.8% retracement, price - 1.5×ATR)
+      Stop loss  : entry_low - 2×ATR  (2×ATR stop for swing traders)
+      Target 1   : entry_high + 2×risk  (2:1 reward-to-risk)
+      Target 2   : entry_high + 3×risk  (3:1 reward-to-risk — partial profit target)
+      Hold est.  : ADX-based (strong trend → longer hold)
+    """
+    last = float(close.iloc[-1])
+
+    # Fibonacci retracement (50-day swing high → 20-day swing low)
+    swing_high = float(close.rolling(50).max().iloc[-1])
+    swing_low  = float(close.rolling(20).min().iloc[-1])
+    fib_range  = swing_high - swing_low if swing_high > swing_low else last * 0.1
+    fib_382 = round(swing_high - fib_range * 0.382, 2)
+    fib_618 = round(swing_high - fib_range * 0.618, 2)
+
+    # Entry zone
+    entry_high = round(last, 2)
+    entry_low  = round(max(fib_618, ema50, last - 1.5 * atr), 2)
+    entry_low  = min(entry_low, entry_high)  # safety: low ≤ high
+
+    # Stop and targets
+    stop_loss = round(entry_low - 2.0 * atr, 2)
+    risk      = entry_high - stop_loss
+    target_1  = round(entry_high + 2.0 * risk, 2)
+    target_2  = round(entry_high + 3.0 * risk, 2)
+
+    return {
+        "entry_low":  entry_low,
+        "entry_high": entry_high,
+        "stop_loss":  stop_loss,
+        "target_1":   target_1,
+        "target_2":   target_2,
+        "fib_382":    fib_382,
+        "fib_618":    fib_618,
+    }
+
+
+def _hold_days_est(adx: float, momentum_ret: float) -> int:
+    """
+    Estimate hold duration in trading days from ADX strength.
+    ADX > 40 = very strong trend → longer hold justified.
+    """
+    if adx >= 40:
+        base = 35
+    elif adx >= 30:
+        base = 25
+    elif adx >= 20:
+        base = 15
+    else:
+        base = 7
+    # Scale slightly by raw momentum magnitude
+    if momentum_ret > 0.40:
+        base = int(base * 1.2)
+    elif momentum_ret < 0.10:
+        base = int(base * 0.8)
+    return min(max(base, 5), 60)
+
+
 # ─── Crossover helpers ────────────────────────────────────────────────────────
 
 def _crossover_info(close: pd.Series, ema50: float, ema200: float) -> dict:
@@ -232,6 +297,11 @@ def _score_stock(df: pd.DataFrame, cfg: dict) -> Optional[dict]:
     # ── EMA50/200 crossover metadata ─────────────────────────────────────────
     cross = _crossover_info(close, ema50, ema200)
 
+    # ── Entry / exit / hold (technical) ──────────────────────────────────────
+    atr_val    = _atr(df).iloc[-1]
+    trade      = _entry_exit_calc(close, atr_val, ema50, ema200)
+    hold_days  = _hold_days_est(adx_val, momentum_ret)
+
     return {
         "last_close":      round(last_close, 2),
         "ema200":          round(ema200, 2),
@@ -246,6 +316,15 @@ def _score_stock(df: pd.DataFrame, cfg: dict) -> Optional[dict]:
         "atr_pct":         round(atr_pct, 2),
         "obv_positive":    bool(obv_positive),
         "composite_score": round(composite, 4),
+        # ── Trade levels (technical) ─────────────────────────────────────────
+        "entry_low":       trade["entry_low"],
+        "entry_high":      trade["entry_high"],
+        "stop_loss":       trade["stop_loss"],
+        "target_1":        trade["target_1"],
+        "target_2":        trade["target_2"],
+        "fib_382":         trade["fib_382"],
+        "fib_618":         trade["fib_618"],
+        "hold_days_est":   hold_days,
     }
 
 

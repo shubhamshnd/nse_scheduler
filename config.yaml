@@ -117,6 +117,11 @@ crossover:
   enabled: true
   alert_days_ahead: 15            # alert when crossover predicted within N days
 
+# ── Intraday Price Watcher ───────────────────────────────────
+price_watcher:
+  enabled: true
+  interval_minutes: 15            # how often to poll during market hours (via scheduler)
+
 # ── News Fetch ───────────────────────────────────────────────
 news:
   max_credits_per_run: 30
@@ -153,10 +158,9 @@ schedule:
 
 # ── Telegram Report ──────────────────────────────────────────
 telegram:
-  enabled: false
+  enabled: true
   send_on_scan_complete: true
   send_earnings_alerts: true
-  max_stocks_in_message: 10
 
 # ── Web Dashboard ────────────────────────────────────────────
 web:
