@@ -5,7 +5,18 @@
 
 {% block content %}
 <div class="d-flex align-items-center justify-content-between mb-4">
-  <h5 class="mb-0 fw-semibold">Dashboard</h5>
+  <div class="d-flex align-items-center gap-3">
+    <h5 class="mb-0 fw-semibold">Dashboard</h5>
+    {% if regime and regime.regime %}
+      {% set rc = {'STRONG_BULL':'success','BULL':'success','BEAR':'danger','STRONG_BEAR':'danger'} %}
+      <span class="badge bg-{{ rc.get(regime.regime,'secondary') }} bg-opacity-75 small">
+        {{ {'STRONG_BULL':'🚀','BULL':'📈','BEAR':'📉','STRONG_BEAR':'⚠️'}.get(regime.regime,'🔄') }}
+        {{ regime.regime.replace('_',' ') }}
+        {% if regime.nifty50_close %}₹{{ '{:,.0f}'.format(regime.nifty50_close) }}{% endif %}
+        {% if regime.pct_above_ema200 is defined %}({{ '{:+.1f}'.format(regime.pct_above_ema200) }}%){% endif %}
+      </span>
+    {% endif %}
+  </div>
   {% if last_run %}
   <span class="text-secondary small">
     Last run: {{ last_run.finished_at[:16].replace('T',' ') if last_run.finished_at else '—' }}
@@ -72,6 +83,9 @@
   </button>
   <button class="btn btn-outline-secondary btn-sm" onclick="triggerRun('telegram')">
     <i class="bi bi-send me-1"></i>Send Telegram
+  </button>
+  <button class="btn btn-outline-warning btn-sm" onclick="triggerRun('crossover_alerts')">
+    <i class="bi bi-lightning-charge me-1"></i>Crossover Alerts
   </button>
 </div>
 <div class="small text-secondary mb-4">
@@ -150,11 +164,14 @@
           <thead>
             <tr>
               <th>#</th><th>Symbol</th><th>Close</th>
-              <th>Momentum</th><th>RSI</th><th>ADX</th><th>Score</th>
+              <th>Momentum</th><th>Sharpe</th><th>RSI</th><th>ADX</th>
+              <th>Cross</th><th>Score</th>
             </tr>
           </thead>
           <tbody>
             {% for s in shortlist %}
+            {% set cross_colors = {'GOLDEN_CROSS':'success','DEATH_CROSS':'danger','BULLISH':'secondary','BEARISH':'secondary'} %}
+            {% set cross_icons  = {'GOLDEN_CROSS':'✨','DEATH_CROSS':'💀','BULLISH':'↑','BEARISH':'↓','GOLDEN_CROSS_FORMING':'⬆','DEATH_CROSS_FORMING':'⬇'} %}
             <tr>
               <td class="text-secondary">{{ s.rank }}</td>
               <td class="fw-semibold">{{ s.symbol.split('.')[0] }}</td>
@@ -162,8 +179,19 @@
               <td class="{% if s.momentum_ret > 0 %}text-success{% else %}text-danger{% endif %}">
                 {{ '%+.1f'|format(s.momentum_ret) }}%
               </td>
+              <td class="{% if s.get('sharpe_momentum',0) > 0.5 %}text-success{% elif s.get('sharpe_momentum',0) < 0 %}text-danger{% else %}text-secondary{% endif %} small">
+                {{ '%.2f'|format(s.get('sharpe_momentum', 0)) }}
+              </td>
               <td>{{ '%.1f'|format(s.rsi) }}</td>
               <td>{{ '%.1f'|format(s.adx) }}</td>
+              <td class="small">
+                {% set cs = s.get('crossover_state','') %}
+                {% set dtc = s.get('days_to_cross') %}
+                <span class="text-{{ cross_colors.get(cs,'secondary') }}">
+                  {{ cross_icons.get(cs,'') }} {{ cs.replace('_',' ') if cs else '—' }}
+                </span>
+                {% if dtc %}<br><span class="text-secondary" style="font-size:.72rem;">~{{ dtc }}d</span>{% endif %}
+              </td>
               <td>
                 <div class="d-flex align-items-center gap-2">
                   <div class="score-track flex-fill">

@@ -3,11 +3,12 @@ pipeline.py — Orchestrates all pipeline tasks.
 
 Task order (recommended):
   1. fundamentals        — quality-filter all ~250 Nifty500 symbols (cached 24h)
-  2. screen              — momentum + technical score on fundamentally-sound stocks
-  3. news                — fetch news only for the top shortlist (saves NewsData credits)
-  4. ai_analysis         — Groq LLM analysis combining technicals + news
+  2. screen              — momentum + technical score (regime-aware, sector-capped)
+  3. news                — fetch news only for the top shortlist
+  4. ai_analysis         — Groq LLM analysis
   5. earnings_dashboard  — upcoming earnings, beat rates
   6. telegram_report     — push results to Telegram
+  7. crossover_alerts    — EMA50/200 crossover imminence alerts (intraday task)
 """
 
 import json
@@ -44,18 +45,22 @@ def run_tasks(task_list: list, cfg: dict) -> dict:
     from core.screener            import run_screener
     from core.news_fetcher        import fetch_news_for_shortlist
     from core.earnings            import get_earnings_data
+    from core.regime              import get_market_regime
     from agents.groq_agent        import run_ai_analysis
-    from agents.telegram_notifier import send_scan_report, send_earnings_alert
+    from agents.telegram_notifier import (
+        send_scan_report, send_earnings_alert, send_crossover_alert
+    )
     import pandas as pd
 
-    status         = {}
-    fund_df        = None    # fundamentally-filtered universe
-    shortlist_df   = None    # technically-ranked shortlist
-    news_data      = None
-    analyses       = None
-    earnings       = None
+    status       = {}
+    fund_df      = None
+    shortlist_df = None
+    news_data    = None
+    analyses     = None
+    earnings     = None
+    regime       = None
 
-    # ── Lazy loaders from disk cache ──────────────────────────────────────────
+    # ── Lazy loaders from disk ────────────────────────────────────────────────
     def get_fund_df():
         nonlocal fund_df
         if fund_df is None:
@@ -92,6 +97,14 @@ def run_tasks(task_list: list, cfg: dict) -> dict:
                 logger.info(f"Loaded cached AI analyses ({len(analyses)} stocks).")
         return analyses
 
+    def get_regime():
+        nonlocal regime
+        if regime is None:
+            cached = _load("regime")
+            if cached:
+                regime = cached
+        return regime
+
     start_ts = datetime.now().isoformat()
     logger.info(f"Pipeline run started | tasks={task_list}")
 
@@ -112,7 +125,13 @@ def run_tasks(task_list: list, cfg: dict) -> dict:
             # ── 2. Technical screen ───────────────────────────────────────────
             elif task == "screen":
                 logger.info("━━ Task: screen (momentum + technical)")
-                # Use fundamentally-filtered symbols if available, else config symbols
+
+                # Fetch regime first — governs shortlist size
+                logger.info("  Checking market regime…")
+                regime = get_market_regime()
+                _save("regime", regime)
+
+                # Fundamentally-filtered symbols
                 fd = get_fund_df()
                 if fd is not None and not fd.empty:
                     fund_symbols = fd["symbol"].tolist()
@@ -120,14 +139,22 @@ def run_tasks(task_list: list, cfg: dict) -> dict:
                 else:
                     fund_symbols = None
                     logger.info("  No fundamentals data — using config symbol list")
-                shortlist_df = run_screener(cfg, symbols=fund_symbols)
+
+                shortlist_df = run_screener(cfg,
+                                            symbols=fund_symbols,
+                                            fund_df=fd,
+                                            regime=regime)
                 if shortlist_df is not None and not shortlist_df.empty:
                     _save("shortlist", shortlist_df)
-                    status[task] = {"ok": True, "count": len(shortlist_df)}
+                    status[task] = {
+                        "ok":     True,
+                        "count":  len(shortlist_df),
+                        "regime": regime.get("regime", "UNKNOWN"),
+                    }
                 else:
                     status[task] = {"ok": False, "error": "Screener returned empty results"}
 
-            # ── 3. News (only for the shortlisted stocks) ─────────────────────
+            # ── 3. News ───────────────────────────────────────────────────────
             elif task == "news":
                 logger.info("━━ Task: news (shortlist only)")
                 sl = get_shortlist()
@@ -137,8 +164,7 @@ def run_tasks(task_list: list, cfg: dict) -> dict:
                 news_data = fetch_news_for_shortlist(sl, cfg)
                 _save("news_data", news_data)
                 covered = sum(1 for v in news_data.values() if v)
-                status[task] = {"ok": True, "stocks_covered": covered,
-                                "total": len(sl)}
+                status[task] = {"ok": True, "stocks_covered": covered, "total": len(sl)}
 
             # ── 4. AI analysis ────────────────────────────────────────────────
             elif task == "ai_analysis":
@@ -179,11 +205,45 @@ def run_tasks(task_list: list, cfg: dict) -> dict:
                     continue
                 sl = get_shortlist()
                 an = get_analyses()
+                rg = get_regime()
                 if an and sl is not None and not sl.empty:
-                    send_scan_report(an, sl, cfg)
+                    send_scan_report(an, sl, cfg, regime=rg)
                 if earnings:
                     send_earnings_alert(earnings, cfg)
                 status[task] = {"ok": True}
+
+            # ── 7. Crossover alerts ───────────────────────────────────────────
+            elif task == "crossover_alerts":
+                logger.info("━━ Task: crossover_alerts")
+                sl = get_shortlist()
+                if sl is None or sl.empty:
+                    status[task] = {"ok": False, "error": "No shortlist — run screen first"}
+                    continue
+
+                alert_days = cfg.get("crossover", {}).get("alert_days_ahead", 15)
+                alerts = []
+
+                for _, row in sl.iterrows():
+                    state = row.get("crossover_state", "")
+                    days  = row.get("days_to_cross")
+
+                    if state == "GOLDEN_CROSS":
+                        alerts.append({**row.to_dict(), "alert_type": "GOLDEN_CROSS"})
+                    elif state == "DEATH_CROSS":
+                        alerts.append({**row.to_dict(), "alert_type": "DEATH_CROSS"})
+                    elif state == "BEARISH" and days and days <= alert_days:
+                        alerts.append({**row.to_dict(), "alert_type": "GOLDEN_CROSS_FORMING"})
+                    elif state == "BULLISH" and days and days <= alert_days:
+                        alerts.append({**row.to_dict(), "alert_type": "DEATH_CROSS_FORMING"})
+
+                if alerts:
+                    logger.info(f"  {len(alerts)} crossover alert(s) found.")
+                    if cfg.get("telegram", {}).get("enabled"):
+                        send_crossover_alert(alerts, cfg)
+                else:
+                    logger.info("  No imminent crossovers in current shortlist.")
+
+                status[task] = {"ok": True, "alerts": len(alerts)}
 
             else:
                 logger.warning(f"Unknown task: {task}")
@@ -206,5 +266,8 @@ def run_tasks(task_list: list, cfg: dict) -> dict:
         "status":      status,
     }
     _save("last_run", run_log)
-    logger.info(f"Pipeline complete | {' | '.join(f'{t}:{'OK' if s.get('ok') else 'FAIL'}' for t,s in status.items())}")
+    summary = " | ".join(
+        f"{t}:{'OK' if s.get('ok') else 'FAIL'}" for t, s in status.items()
+    )
+    logger.info(f"Pipeline complete | {summary}")
     return status

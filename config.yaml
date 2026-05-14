@@ -101,11 +101,21 @@ screening:
     rsi_min: 35
     rsi_max: 72
     ema_above_200: true
+    require_golden_cross: false   # true = only stocks where EMA50 > EMA200
   scoring_weights:
-    momentum_score: 0.40
+    momentum_score: 0.40          # now uses Sharpe-adjusted momentum
     rsi_score: 0.20
     adx_score: 0.20
     volume_score: 0.20
+  sector_cap: 3                   # max stocks per sector in final shortlist
+  regime_filter:
+    enabled: true                 # shrink shortlist in BEAR markets
+    bear_shortlist_size: 5        # shortlist size when Nifty50 < EMA200
+
+# ── EMA Crossover Alerts ─────────────────────────────────────
+crossover:
+  enabled: true
+  alert_days_ahead: 15            # alert when crossover predicted within N days
 
 # ── News Fetch ───────────────────────────────────────────────
 news:
@@ -131,6 +141,12 @@ schedule:
     - name: "earnings_check"
       time: "09:15"
       tasks: ["earnings_dashboard", "telegram_report"]
+    - name: "midday_crossover"
+      time: "11:00"
+      tasks: ["crossover_alerts"]   # intraday crossover check (market hours)
+    - name: "afternoon_crossover"
+      time: "14:30"
+      tasks: ["crossover_alerts"]   # second check before close
     - name: "evening_review"
       time: "16:30"
       tasks: ["screen", "news", "ai_analysis", "telegram_report"]

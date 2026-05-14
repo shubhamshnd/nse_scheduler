@@ -80,13 +80,15 @@ def index():
     sched = get_scheduler()
     jobs  = list_jobs(sched) if sched else []
     is_running = _run_lock.locked()
+    regime = _load_json("regime") or {}
     return render_template("index.html",
                            analyses=analyses,
                            shortlist=shortlist,
                            last_run=last_run,
                            jobs=jobs,
                            is_running=is_running,
-                           cfg=cfg)
+                           cfg=cfg,
+                           regime=regime)
 
 
 @app.route("/earnings")
@@ -157,16 +159,17 @@ def logs_page():
 @app.route("/run/<task>", methods=["POST"])
 def run_task(task: str):
     allowed = {
-        "full":         ["fundamentals", "screen", "news", "ai_analysis",
-                         "earnings_dashboard", "telegram_report"],
-        "fundamentals": ["fundamentals"],
-        "screen":       ["screen"],
-        "news":         ["news"],
-        "ai":           ["ai_analysis"],
-        "earnings":     ["earnings_dashboard"],
-        "telegram":     ["telegram_report"],
-        "scan_only":    ["screen", "news", "ai_analysis"],
-        "full_scan":    ["fundamentals", "screen", "news", "ai_analysis"],
+        "full":             ["fundamentals", "screen", "news", "ai_analysis",
+                             "earnings_dashboard", "telegram_report"],
+        "fundamentals":     ["fundamentals"],
+        "screen":           ["screen"],
+        "news":             ["news"],
+        "ai":               ["ai_analysis"],
+        "earnings":         ["earnings_dashboard"],
+        "telegram":         ["telegram_report"],
+        "scan_only":        ["screen", "news", "ai_analysis"],
+        "full_scan":        ["fundamentals", "screen", "news", "ai_analysis"],
+        "crossover_alerts": ["crossover_alerts"],
     }
     tasks = allowed.get(task)
     if not tasks:
@@ -208,6 +211,11 @@ def api_shortlist():
 @app.route("/api/earnings")
 def api_earnings():
     return jsonify(_load_json("earnings") or [])
+
+
+@app.route("/api/regime")
+def api_regime():
+    return jsonify(_load_json("regime") or {})
 
 
 # ─── Entry Point ─────────────────────────────────────────────────────────────

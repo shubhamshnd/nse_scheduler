@@ -1,13 +1,14 @@
 """
-screener.py — Fetches OHLCV data, computes momentum + technical scores,
-              returns a ranked shortlist of Nifty500 stocks.
+screener.py — Momentum + technical screener with three hedge-fund-grade enhancements:
 
-Supports both yfinance (testing) and Alpha Vantage (production).
+  1. Sharpe-adjusted momentum  — ranks by return/volatility, not raw return
+  2. EMA50/200 crossover info  — detects golden/death cross, predicts days to next
+  3. Sector concentration cap  — enforces max N stocks per sector in the shortlist
 """
 
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional
 
 import numpy as np
@@ -17,13 +18,12 @@ import requests
 logger = logging.getLogger(__name__)
 
 
-# ─── yfinance helpers ────────────────────────────────────────────────────────
+# ─── Data fetchers ────────────────────────────────────────────────────────────
 
 def _fetch_yfinance(symbol: str, period: str = "2y") -> Optional[pd.DataFrame]:
     try:
         import yfinance as yf
-        ticker = yf.Ticker(symbol)
-        df = ticker.history(period=period, auto_adjust=True)
+        df = yf.Ticker(symbol).history(period=period, auto_adjust=True)
         if df.empty:
             logger.warning(f"[yfinance] No data for {symbol}")
             return None
@@ -35,8 +35,6 @@ def _fetch_yfinance(symbol: str, period: str = "2y") -> Optional[pd.DataFrame]:
         logger.error(f"[yfinance] Error fetching {symbol}: {e}")
         return None
 
-
-# ─── Alpha Vantage helpers ────────────────────────────────────────────────────
 
 def _fetch_alpha_vantage(symbol: str, api_key: str) -> Optional[pd.DataFrame]:
     url = (
@@ -51,24 +49,24 @@ def _fetch_alpha_vantage(symbol: str, api_key: str) -> Optional[pd.DataFrame]:
         if key not in data:
             logger.warning(f"[AV] No data for {symbol}: {data.get('Note', data.get('Information', ''))}")
             return None
-        rows = []
-        for date_str, vals in data[key].items():
-            rows.append({
-                "date": pd.to_datetime(date_str),
-                "open":   float(vals["1. open"]),
-                "high":   float(vals["2. high"]),
-                "low":    float(vals["3. low"]),
-                "close":  float(vals["5. adjusted close"]),
-                "volume": float(vals["6. volume"]),
-            })
-        df = pd.DataFrame(rows).set_index("date").sort_index()
-        return df
+        rows = [
+            {
+                "date":   pd.to_datetime(d),
+                "open":   float(v["1. open"]),
+                "high":   float(v["2. high"]),
+                "low":    float(v["3. low"]),
+                "close":  float(v["5. adjusted close"]),
+                "volume": float(v["6. volume"]),
+            }
+            for d, v in data[key].items()
+        ]
+        return pd.DataFrame(rows).set_index("date").sort_index()
     except Exception as e:
         logger.error(f"[AV] Error fetching {symbol}: {e}")
         return None
 
 
-# ─── Technical Indicators (pure pandas — no TA-Lib dependency) ───────────────
+# ─── Technical indicators (pure pandas) ──────────────────────────────────────
 
 def _ema(series: pd.Series, period: int) -> pd.Series:
     return series.ewm(span=period, adjust=False).mean()
@@ -76,9 +74,9 @@ def _ema(series: pd.Series, period: int) -> pd.Series:
 
 def _rsi(close: pd.Series, period: int = 14) -> pd.Series:
     delta = close.diff()
-    gain = delta.clip(lower=0).rolling(period).mean()
-    loss = (-delta.clip(upper=0)).rolling(period).mean()
-    rs = gain / loss.replace(0, np.nan)
+    gain  = delta.clip(lower=0).rolling(period).mean()
+    loss  = (-delta.clip(upper=0)).rolling(period).mean()
+    rs    = gain / loss.replace(0, np.nan)
     return 100 - (100 / (1 + rs))
 
 
@@ -87,20 +85,21 @@ def _adx(df: pd.DataFrame, period: int = 14) -> pd.Series:
     tr = pd.concat([
         high - low,
         (high - close.shift()).abs(),
-        (low - close.shift()).abs()
+        (low  - close.shift()).abs(),
     ], axis=1).max(axis=1)
-    dm_plus  = ((high - high.shift()) > (low.shift() - low)).astype(float) * (high - high.shift()).clip(lower=0)
-    dm_minus = ((low.shift() - low) > (high - high.shift())).astype(float) * (low.shift() - low).clip(lower=0)
-    atr   = tr.ewm(span=period, adjust=False).mean()
-    di_p  = 100 * dm_plus.ewm(span=period, adjust=False).mean()  / atr
-    di_m  = 100 * dm_minus.ewm(span=period, adjust=False).mean() / atr
-    dx    = (100 * (di_p - di_m).abs() / (di_p + di_m).replace(0, np.nan))
+    dm_p = ((high - high.shift()) > (low.shift() - low)).astype(float) \
+           * (high - high.shift()).clip(lower=0)
+    dm_m = ((low.shift() - low) > (high - high.shift())).astype(float) \
+           * (low.shift() - low).clip(lower=0)
+    atr  = tr.ewm(span=period,  adjust=False).mean()
+    di_p = 100 * dm_p.ewm(span=period, adjust=False).mean() / atr
+    di_m = 100 * dm_m.ewm(span=period, adjust=False).mean() / atr
+    dx   = 100 * (di_p - di_m).abs() / (di_p + di_m).replace(0, np.nan)
     return dx.ewm(span=period, adjust=False).mean()
 
 
 def _obv(df: pd.DataFrame) -> pd.Series:
-    direction = np.sign(df["close"].diff().fillna(0))
-    return (direction * df["volume"]).cumsum()
+    return (np.sign(df["close"].diff().fillna(0)) * df["volume"]).cumsum()
 
 
 def _atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
@@ -108,16 +107,63 @@ def _atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
     tr = pd.concat([
         high - low,
         (high - close.shift()).abs(),
-        (low - close.shift()).abs()
+        (low  - close.shift()).abs(),
     ], axis=1).max(axis=1)
     return tr.rolling(period).mean()
+
+
+# ─── Crossover helpers ────────────────────────────────────────────────────────
+
+def _crossover_info(close: pd.Series, ema50: float, ema200: float) -> dict:
+    """
+    Returns crossover_state and days_to_cross using a 30-day spread regression.
+
+    crossover_state:
+      GOLDEN_CROSS  — EMA50 crossed above EMA200 within last 10 days
+      DEATH_CROSS   — EMA50 crossed below EMA200 within last 10 days
+      BULLISH       — EMA50 above EMA200, no recent cross
+      BEARISH       — EMA50 below EMA200, no recent cross
+
+    days_to_cross:
+      Positive integer = predicted calendar days until the next cross
+      None = no crossing expected within 90 days at current trajectory
+    """
+    ema50_s  = _ema(close, 50).iloc[-31:]
+    ema200_s = _ema(close, 200).iloc[-31:]
+    spread   = (ema50_s - ema200_s)
+
+    # Recent sign change detection (within last 10 bars)
+    sign_now  = np.sign(spread.iloc[-1])
+    sign_past = np.sign(spread.iloc[-10])
+    recent_cross = (sign_now != sign_past) and (sign_past != 0)
+
+    if ema50 > ema200:
+        state = "GOLDEN_CROSS" if recent_cross else "BULLISH"
+    else:
+        state = "DEATH_CROSS"  if recent_cross else "BEARISH"
+
+    # Predict days to next crossover via OLS on 30-day spread
+    days_to_cross = None
+    s30 = spread.iloc[-30:].dropna()
+    if len(s30) >= 10:
+        x = np.arange(len(s30))
+        slope, intercept = np.polyfit(x, s30.values, 1)
+        if abs(slope) > 0.01:
+            # Extrapolate from last point (index = len-1) to spread = 0
+            projected = intercept + slope * (len(s30) - 1)
+            d = -projected / slope
+            d = int(round(d))
+            if 1 <= d <= 90:
+                days_to_cross = d
+
+    return {"crossover_state": state, "days_to_cross": days_to_cross}
 
 
 # ─── Scoring ─────────────────────────────────────────────────────────────────
 
 def _score_stock(df: pd.DataFrame, cfg: dict) -> Optional[dict]:
     s_cfg = cfg["screening"]
-    w = s_cfg["scoring_weights"]
+    w     = s_cfg["scoring_weights"]
     t_cfg = s_cfg["technical"]
     m_cfg = s_cfg["momentum"]
 
@@ -126,35 +172,54 @@ def _score_stock(df: pd.DataFrame, cfg: dict) -> Optional[dict]:
 
     close = df["close"]
 
-    lb   = m_cfg["lookback_days"]
-    excl = m_cfg["exclude_recent_days"]
+    # ── EMA filters ──────────────────────────────────────────────────────────
+    ema200 = _ema(close, 200).iloc[-1]
+    ema50  = _ema(close, 50).iloc[-1]
+    last_close = close.iloc[-1]
+
+    if t_cfg.get("ema_above_200") and last_close < ema200:
+        return None
+
+    if t_cfg.get("require_golden_cross", False) and ema50 < ema200:
+        return None
+
+    # ── Raw 12-1 momentum ────────────────────────────────────────────────────
+    lb, excl = m_cfg["lookback_days"], m_cfg["exclude_recent_days"]
     if len(close) < lb + 5:
         return None
     momentum_ret = (close.iloc[-excl] / close.iloc[-lb]) - 1
 
-    ema200 = _ema(close, 200).iloc[-1]
-    last_close = close.iloc[-1]
-    if t_cfg.get("ema_above_200") and last_close < ema200:
-        return None
+    # ── Sharpe-adjusted momentum (rank signal) ───────────────────────────────
+    monthly = close.resample("ME").last().pct_change().dropna()
+    if len(monthly) >= 6:
+        std = monthly.std()
+        sharpe_mom = (monthly.mean() / std * np.sqrt(12)) if std > 0 else 0.0
+    else:
+        sharpe_mom = momentum_ret  # fallback for short history
 
+    # ── RSI ──────────────────────────────────────────────────────────────────
     rsi_val = _rsi(close).iloc[-1]
     if not (t_cfg["rsi_min"] <= rsi_val <= t_cfg["rsi_max"]):
         return None
 
+    # ── ADX ──────────────────────────────────────────────────────────────────
     adx_val = _adx(df).iloc[-1]
     if adx_val < t_cfg["adx_min"]:
         return None
 
-    obv_series = _obv(df).iloc[-20:]
-    obv_slope = np.polyfit(range(len(obv_series)), obv_series.values, 1)[0]
+    # ── OBV trend ────────────────────────────────────────────────────────────
+    obv_series  = _obv(df).iloc[-20:]
+    obv_slope   = np.polyfit(range(len(obv_series)), obv_series.values, 1)[0]
     obv_positive = 1.0 if obv_slope > 0 else 0.0
 
-    atr_val = _atr(df).iloc[-1]
-    atr_pct = atr_val / last_close * 100
+    # ── ATR ──────────────────────────────────────────────────────────────────
+    atr_pct = _atr(df).iloc[-1] / last_close * 100
 
-    mom_score  = np.clip((momentum_ret + 0.30) / 0.90, 0, 1)
+    # ── Composite score ───────────────────────────────────────────────────────
+    # Sharpe momentum normalised: Sharpe -1→0, 0→0.33, 2→1.0
+    mom_score  = float(np.clip((sharpe_mom + 1.0) / 3.0, 0, 1))
     rsi_score  = 1 - abs(rsi_val - 55) / 55
-    adx_score  = np.clip((adx_val - 20) / 40, 0, 1)
+    adx_score  = float(np.clip((adx_val - 20) / 40, 0, 1))
     vol_score  = obv_positive
 
     composite = (
@@ -164,10 +229,18 @@ def _score_stock(df: pd.DataFrame, cfg: dict) -> Optional[dict]:
         w["volume_score"]   * vol_score
     )
 
+    # ── EMA50/200 crossover metadata ─────────────────────────────────────────
+    cross = _crossover_info(close, ema50, ema200)
+
     return {
         "last_close":      round(last_close, 2),
         "ema200":          round(ema200, 2),
+        "ema50":           round(ema50, 2),
+        "spread_pct":      round((ema50 - ema200) / last_close * 100, 2),
+        "crossover_state": cross["crossover_state"],
+        "days_to_cross":   cross["days_to_cross"],
         "momentum_ret":    round(momentum_ret * 100, 2),
+        "sharpe_momentum": round(float(sharpe_mom), 3),
         "rsi":             round(rsi_val, 2),
         "adx":             round(adx_val, 2),
         "atr_pct":         round(atr_pct, 2),
@@ -176,57 +249,103 @@ def _score_stock(df: pd.DataFrame, cfg: dict) -> Optional[dict]:
     }
 
 
-# ─── Main Screener ───────────────────────────────────────────────────────────
+# ─── Main screener ────────────────────────────────────────────────────────────
 
-def run_screener(cfg: dict, symbols: list = None) -> pd.DataFrame:
+def run_screener(cfg: dict,
+                 symbols:  list = None,
+                 fund_df:  pd.DataFrame = None,
+                 regime:   dict = None) -> pd.DataFrame:
     """
-    symbols — pre-filtered list (e.g. from fundamentals stage).
-              If None, falls back to the symbol list in config.yaml.
+    symbols  — pre-filtered list from fundamentals stage (None → config symbols)
+    fund_df  — fundamentals DataFrame with 'sector' column for sector-cap logic
+    regime   — market regime dict from regime.get_market_regime()
     """
     from core.config_loader import get_symbols
 
     source      = cfg["data_source"]
     av_key      = cfg["api_keys"].get("alpha_vantage", "")
-    shortlist_n = cfg["universe"]["shortlist_size"]
+    s_cfg       = cfg.get("screening", {})
+    r_cfg       = s_cfg.get("regime_filter", {})
+    sector_cap  = s_cfg.get("sector_cap", 4)
 
+    # ── Regime-aware shortlist size ───────────────────────────────────────────
+    shortlist_n = cfg["universe"]["shortlist_size"]
+    if regime and not regime.get("above_ema200", True) and r_cfg.get("enabled", True):
+        bear_n = r_cfg.get("bear_shortlist_size", 5)
+        logger.warning(
+            f"BEAR market (Nifty50 below EMA200) — shrinking shortlist "
+            f"{shortlist_n} → {bear_n}"
+        )
+        shortlist_n = bear_n
+
+    # ── Symbol list ───────────────────────────────────────────────────────────
     if symbols is None:
         symbols = get_symbols(cfg)
 
+    # ── Sector map from fundamentals ──────────────────────────────────────────
+    sector_map = {}
+    if fund_df is not None and not fund_df.empty and "sector" in fund_df.columns:
+        sector_map = dict(zip(fund_df["symbol"], fund_df["sector"].fillna("Unknown")))
+
     results = []
-    total = len(symbols)
+    total   = len(symbols)
     logger.info(f"Starting technical screen of {total} symbols via [{source}]")
 
     for i, sym in enumerate(symbols, 1):
-        logger.debug(f"[{i}/{total}] Processing {sym}")
-
         if source == "yfinance":
             df = _fetch_yfinance(sym)
         else:
             df = _fetch_alpha_vantage(sym, av_key)
-            time.sleep(12)  # AV free tier: 5 calls/min
+            time.sleep(12)
 
         if df is None or df.empty:
             continue
 
         score = _score_stock(df, cfg)
         if score is None:
-            logger.debug(f"  {sym} filtered out (technical criteria)")
+            logger.debug(f"  [{i}/{total}] {sym} filtered out")
             continue
 
         score["symbol"] = sym
+        score["sector"] = sector_map.get(sym, "Unknown")
         results.append(score)
-        logger.info(f"  {sym}  score={score['composite_score']:.3f}  "
-                    f"mom={score['momentum_ret']:+.1f}%  RSI={score['rsi']:.1f}  ADX={score['adx']:.1f}")
+        logger.info(
+            f"  {sym:<22} score={score['composite_score']:.3f}  "
+            f"mom={score['momentum_ret']:+.1f}%  "
+            f"sharpe={score['sharpe_momentum']:+.2f}  "
+            f"RSI={score['rsi']:.1f}  ADX={score['adx']:.1f}  "
+            f"[{score['crossover_state']}]"
+        )
 
     if not results:
         logger.warning("Screener returned 0 results.")
         return pd.DataFrame()
 
     df_out = pd.DataFrame(results).sort_values("composite_score", ascending=False)
-    df_out = df_out.reset_index(drop=True)
-    shortlist = df_out.head(shortlist_n).copy()
-    shortlist["rank"] = range(1, len(shortlist) + 1)
-    shortlist["screened_at"] = datetime.now().isoformat()
+
+    # ── Sector concentration cap ──────────────────────────────────────────────
+    if sector_cap and sector_cap > 0:
+        sector_counts: dict = {}
+        capped = []
+        for _, row in df_out.iterrows():
+            sec = row.get("sector", "Unknown")
+            if sector_counts.get(sec, 0) < sector_cap:
+                capped.append(row)
+                sector_counts[sec] = sector_counts.get(sec, 0) + 1
+            if len(capped) >= shortlist_n:
+                break
+        shortlist = pd.DataFrame(capped).reset_index(drop=True)
+
+        # Log if cap was applied
+        if len(shortlist) < len(df_out.head(shortlist_n)):
+            capped_sectors = {s: c for s, c in sector_counts.items() if c >= sector_cap}
+            logger.info(f"Sector cap ({sector_cap}/sector) applied. "
+                        f"Capped: {capped_sectors}")
+    else:
+        shortlist = df_out.head(shortlist_n).reset_index(drop=True)
+
+    shortlist["rank"]         = range(1, len(shortlist) + 1)
+    shortlist["screened_at"]  = datetime.now().isoformat()
 
     logger.info(f"Screener complete. Shortlist: {len(shortlist)} stocks.")
     return shortlist
