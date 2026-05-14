@@ -178,17 +178,23 @@ def _score_stock(df: pd.DataFrame, cfg: dict) -> Optional[dict]:
 
 # ─── Main Screener ───────────────────────────────────────────────────────────
 
-def run_screener(cfg: dict) -> pd.DataFrame:
+def run_screener(cfg: dict, symbols: list = None) -> pd.DataFrame:
+    """
+    symbols — pre-filtered list (e.g. from fundamentals stage).
+              If None, falls back to the symbol list in config.yaml.
+    """
     from core.config_loader import get_symbols
 
-    source   = cfg["data_source"]
-    symbols  = get_symbols(cfg)
-    av_key   = cfg["api_keys"].get("alpha_vantage", "")
+    source      = cfg["data_source"]
+    av_key      = cfg["api_keys"].get("alpha_vantage", "")
     shortlist_n = cfg["universe"]["shortlist_size"]
+
+    if symbols is None:
+        symbols = get_symbols(cfg)
 
     results = []
     total = len(symbols)
-    logger.info(f"Starting screen of {total} symbols via [{source}]")
+    logger.info(f"Starting technical screen of {total} symbols via [{source}]")
 
     for i, sym in enumerate(symbols, 1):
         logger.debug(f"[{i}/{total}] Processing {sym}")

@@ -31,27 +31,59 @@ def _build_prompt(symbol: str, score_data: dict, articles: list) -> str:
     else:
         news_block = "\n  No recent news articles found.\n"
 
-    return f"""You are a professional equity analyst for Indian markets (BSE/NSE, Nifty500 universe).
+    last_close = float(score_data.get('last_close') or 0)
+    ema200     = float(score_data.get('ema200') or 0)
+    atr_pct    = float(score_data.get('atr_pct') or 2.0)
+    pct_above  = ((last_close / ema200) - 1) * 100 if ema200 > 0 else 0
 
-Analyse the following stock and provide a structured investment opinion.
+    if pct_above > 15:
+        entry_context = (
+            f"ENTRY GUIDANCE: Current price ₹{last_close:.2f} is {pct_above:.1f}% ABOVE EMA200 ₹{ema200:.2f}. "
+            f"This is a momentum trade — do NOT suggest waiting for the EMA level; that requires a "
+            f"{pct_above:.0f}% correction and defeats the purpose. "
+            f"suggested_entry_note should recommend buying near the CURRENT PRICE on a 1-3 day "
+            f"intraday dip of ~{atr_pct:.1f}–{atr_pct*1.5:.1f}% (≈1 ATR), e.g. around "
+            f"₹{last_close * (1 - atr_pct/100):.0f}–₹{last_close:.0f}."
+        )
+    elif pct_above > 5:
+        entry_context = (
+            f"ENTRY GUIDANCE: Price ₹{last_close:.2f} is {pct_above:.1f}% above EMA200 ₹{ema200:.2f}. "
+            f"Suggest entry near current price on a minor pullback, not at the EMA level."
+        )
+    elif pct_above >= 0:
+        entry_context = (
+            f"ENTRY GUIDANCE: Price ₹{last_close:.2f} is just {pct_above:.1f}% above EMA200 ₹{ema200:.2f}. "
+            f"A breakout-and-retest entry near EMA or current support is appropriate."
+        )
+    else:
+        entry_context = (
+            f"ENTRY GUIDANCE: Price ₹{last_close:.2f} is BELOW EMA200 ₹{ema200:.2f} — "
+            f"confirm trend reversal before entry."
+        )
+
+    return f"""You are a professional equity analyst for Indian markets (BSE/NSE, Nifty500 universe).
+This system uses a MOMENTUM strategy — stocks are selected because they are trending UP,
+above their EMA200, with strong ADX and positive OBV. Analyse accordingly.
 
 ═══════════════════════════════════════
 STOCK: {symbol}
 Date:  {datetime.now().strftime('%Y-%m-%d')}
 ═══════════════════════════════════════
 
-TECHNICAL SNAPSHOT:
-  Last Close:        ₹{score_data.get('last_close', 'N/A')}
-  EMA 200:           ₹{score_data.get('ema200', 'N/A')}
+TECHNICAL SNAPSHOT (all data is current/live from today):
+  Last Close:        ₹{last_close:.2f}
+  EMA 200:           ₹{ema200:.2f}  (price is {pct_above:+.1f}% relative to EMA200)
   12-Month Momentum: {score_data.get('momentum_ret', 'N/A')}%
   RSI (14):          {score_data.get('rsi', 'N/A')}
   ADX (14):          {score_data.get('adx', 'N/A')}
-  ATR % of Price:    {score_data.get('atr_pct', 'N/A')}%
+  ATR % of Price:    {atr_pct:.2f}%  (≈₹{last_close * atr_pct / 100:.0f} per day)
   OBV Positive:      {score_data.get('obv_positive', 'N/A')}
   Composite Score:   {score_data.get('composite_score', 'N/A')} (0–1 scale)
   Rank in Shortlist: #{score_data.get('rank', 'N/A')}
 
 RECENT NEWS:{news_block}
+
+{entry_context}
 
 ═══════════════════════════════════════
 Respond ONLY with a valid JSON object (no markdown, no preamble) with this exact structure:
@@ -64,9 +96,9 @@ Respond ONLY with a valid JSON object (no markdown, no preamble) with this exact
   "key_risks": [<up to 3 short strings>],
   "recommendation": "BUY" | "HOLD" | "AVOID",
   "target_horizon": "short_term (1-4 weeks)" | "medium_term (1-3 months)",
-  "suggested_entry_note": "<one concise sentence on entry strategy>",
-  "stop_loss_note": "<one concise sentence referencing ATR>",
-  "summary": "<2-3 sentence plain English summary>"
+  "suggested_entry_note": "<actionable entry near current price — see ENTRY GUIDANCE above>",
+  "stop_loss_note": "<stop loss using ATR: e.g. stop at ₹X which is 2×ATR below entry>",
+  "summary": "<2-3 sentence plain English summary mentioning current price vs EMA relationship>"
 }}"""
 
 

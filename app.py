@@ -96,8 +96,33 @@ def earnings_page():
     return render_template("earnings.html", earnings=earnings, last_run=last_run)
 
 
-@app.route("/config", methods=["GET", "POST"])
+@app.route("/config", methods=["GET"])
 def config_page():
+    cfg = _load_cfg()
+    return render_template("config.html", cfg=cfg)
+
+
+@app.route("/config/save", methods=["POST"])
+def config_save():
+    """Accepts a full config dict as JSON, saves it, reloads the scheduler."""
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"ok": False, "error": "No JSON body received"}), 400
+    try:
+        from core.config_loader import save_config
+        save_config(data, CFG_PATH)
+        from core.scheduler import reload_schedule
+        reload_schedule(data, str(CFG_PATH))
+        logger.info("Config updated via form UI.")
+        return jsonify({"ok": True, "message": "Configuration saved. Scheduler reloaded."})
+    except Exception as e:
+        logger.exception(f"Config save error: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+
+@app.route("/config/yaml", methods=["GET", "POST"])
+def config_yaml():
+    """Raw YAML editor — for advanced edits (symbol lists, custom fields)."""
     msg = None
     if request.method == "POST":
         raw = request.form.get("config_yaml", "")
@@ -105,19 +130,17 @@ def config_page():
             new_cfg = yaml.safe_load(raw)
             from core.config_loader import save_config
             save_config(new_cfg, CFG_PATH)
-            # Reload scheduler with new config
             from core.scheduler import reload_schedule
             reload_schedule(new_cfg, str(CFG_PATH))
             msg = ("success", "Configuration saved and scheduler reloaded.")
-            logger.info("Config updated via web UI.")
+            logger.info("Config updated via raw YAML editor.")
         except yaml.YAMLError as e:
             msg = ("error", f"YAML parse error: {e}")
         except Exception as e:
             msg = ("error", f"Save error: {e}")
-
     with open(CFG_PATH) as f:
         raw_yaml = f.read()
-    return render_template("config.html", raw_yaml=raw_yaml, msg=msg)
+    return render_template("config_yaml.html", raw_yaml=raw_yaml, msg=msg)
 
 
 @app.route("/logs")
@@ -134,13 +157,16 @@ def logs_page():
 @app.route("/run/<task>", methods=["POST"])
 def run_task(task: str):
     allowed = {
-        "full":      ["screen", "news", "ai_analysis", "earnings_dashboard", "telegram_report"],
-        "screen":    ["screen"],
-        "news":      ["news"],
-        "ai":        ["ai_analysis"],
-        "earnings":  ["earnings_dashboard"],
-        "telegram":  ["telegram_report"],
-        "scan_only": ["screen", "news", "ai_analysis"],
+        "full":         ["fundamentals", "screen", "news", "ai_analysis",
+                         "earnings_dashboard", "telegram_report"],
+        "fundamentals": ["fundamentals"],
+        "screen":       ["screen"],
+        "news":         ["news"],
+        "ai":           ["ai_analysis"],
+        "earnings":     ["earnings_dashboard"],
+        "telegram":     ["telegram_report"],
+        "scan_only":    ["screen", "news", "ai_analysis"],
+        "full_scan":    ["fundamentals", "screen", "news", "ai_analysis"],
     }
     tasks = allowed.get(task)
     if not tasks:

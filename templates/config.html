@@ -1,73 +1,650 @@
 {% extends "base.html" %}
 {% set active = "config" %}
-
 {% block title %}Config — Nifty Pipeline{% endblock %}
 
 {% block content %}
+<script>
+/* Embed current config so JS can start from it and preserve untouched fields */
+const CFG = {{ cfg | tojson }};
+</script>
+
 <div class="d-flex align-items-center justify-content-between mb-4">
   <h5 class="mb-0 fw-semibold">Configuration</h5>
-  <a href="/" class="btn btn-outline-secondary btn-sm">
-    <i class="bi bi-arrow-left me-1"></i>Dashboard
-  </a>
-</div>
-
-{% if msg %}
-<div class="alert alert-{{ 'success' if msg[0] == 'success' else 'danger' }} alert-dismissible fade show" role="alert">
-  <i class="bi bi-{{ 'check-circle' if msg[0] == 'success' else 'exclamation-triangle' }} me-2"></i>
-  {{ msg[1] }}
-  <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-</div>
-{% endif %}
-
-<div class="card mb-3">
-  <div class="card-header py-2 d-flex align-items-center gap-2">
-    <i class="bi bi-file-code text-secondary"></i>
-    <span class="fw-semibold small">config.yaml</span>
-    <span class="ms-auto small text-secondary">Edit carefully — saves immediately on submit</span>
-  </div>
-  <div class="card-body p-0">
-    <form method="POST" action="/config">
-      <textarea name="config_yaml" id="cfg-editor" class="form-control border-0 rounded-0"
-        style="font-family: 'SFMono-Regular', Consolas, monospace; font-size: .83rem;
-               min-height: 520px; background: #0d1117; color: #e6edf3; resize: vertical;"
-        spellcheck="false">{{ raw_yaml }}</textarea>
-      <div class="d-flex gap-2 p-3 border-top border-secondary border-opacity-25">
-        <button type="submit" class="btn btn-primary btn-sm">
-          <i class="bi bi-floppy me-1"></i>Save & Reload Scheduler
-        </button>
-        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="location.reload()">
-          <i class="bi bi-arrow-counterclockwise me-1"></i>Discard Changes
-        </button>
-      </div>
-    </form>
+  <div class="d-flex gap-2">
+    <a href="/config/yaml" class="btn btn-outline-secondary btn-sm">
+      <i class="bi bi-code-slash me-1"></i>Raw YAML
+    </a>
+    <button class="btn btn-primary btn-sm" onclick="saveCfg()">
+      <i class="bi bi-floppy me-1"></i>Save Config
+    </button>
   </div>
 </div>
 
-<!-- ── Quick Reference ───────────────────────────────────────────────────── -->
-<div class="card">
-  <div class="card-header py-2">
-    <span class="fw-semibold small"><i class="bi bi-info-circle me-1 text-secondary"></i>Quick Reference</span>
-  </div>
-  <div class="card-body">
-    <div class="row g-3 small text-secondary">
-      <div class="col-md-4">
-        <strong class="text-light d-block mb-1">Data Source</strong>
-        <code>yfinance</code> — free, no key needed (testing)<br>
-        <code>alpha_vantage</code> — production, needs key
-      </div>
-      <div class="col-md-4">
-        <strong class="text-light d-block mb-1">Schedule format</strong>
-        Time in 24h <code>HH:MM</code>, timezone <code>Asia/Kolkata</code><br>
-        Tasks: <code>screen</code>, <code>news</code>, <code>ai_analysis</code>,
-        <code>earnings_dashboard</code>, <code>telegram_report</code>
-      </div>
-      <div class="col-md-4">
-        <strong class="text-light d-block mb-1">Telegram setup</strong>
-        1. Create bot via @BotFather → copy token<br>
-        2. Send a message to your bot<br>
-        3. Visit <code>getUpdates</code> API to find <code>chat_id</code>
+<!-- Save result banner -->
+<div id="save-result" class="alert d-none mb-3" role="alert"></div>
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<div class="accordion" id="cfg-accordion">
+
+  <!-- ── 1. API Keys ──────────────────────────────────────── -->
+  <div class="accordion-item bg-transparent border-secondary border-opacity-25">
+    <h2 class="accordion-header">
+      <button class="accordion-button bg-dark text-light" type="button"
+              data-bs-toggle="collapse" data-bs-target="#sec-keys">
+        <i class="bi bi-key me-2 text-warning"></i>API Keys
+      </button>
+    </h2>
+    <div id="sec-keys" class="accordion-collapse collapse show">
+      <div class="accordion-body">
+        <p class="small text-secondary mb-3">
+          Keys are stored in <code>config.yaml</code> on disk. They are never sent anywhere except the respective API.
+        </p>
+        {% macro key_row(label, id, key_path, placeholder='') %}
+        <div class="row align-items-center mb-3">
+          <label class="col-sm-4 col-form-label col-form-label-sm text-secondary">{{ label }}</label>
+          <div class="col-sm-8">
+            <div class="input-group input-group-sm">
+              <input type="password" class="form-control form-control-sm bg-dark text-light border-secondary"
+                     id="{{ id }}" placeholder="{{ placeholder }}"
+                     value="{{ cfg.api_keys[key_path] if cfg.api_keys and cfg.api_keys[key_path] else '' }}">
+              <button class="btn btn-outline-secondary btn-sm" type="button"
+                      onclick="togglePw('{{ id }}')">
+                <i class="bi bi-eye" id="{{ id }}-eye"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+        {% endmacro %}
+        {{ key_row('Alpha Vantage Key', 'k-av',   'alpha_vantage', 'YOUR_ALPHA_VANTAGE_KEY') }}
+        {{ key_row('NewsData.io Key',   'k-nd',   'newsdata_io',   'YOUR_NEWSDATA_IO_KEY') }}
+        {{ key_row('Groq API Key',      'k-groq', 'groq',          'YOUR_GROQ_API_KEY') }}
+        {{ key_row('Telegram Bot Token','k-tgbot','telegram_bot',  'BOT_TOKEN from @BotFather') }}
+        <div class="row align-items-center mb-2">
+          <label class="col-sm-4 col-form-label col-form-label-sm text-secondary">Telegram Chat ID</label>
+          <div class="col-sm-8">
+            <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary"
+                   id="k-tgchat" placeholder="Your chat or group ID"
+                   value="{{ cfg.api_keys.telegram_chat if cfg.api_keys else '' }}">
+            <div class="form-text small">
+              Start a chat with your bot, then visit
+              <code>https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code> to find your chat_id.
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
+
+  <!-- ── 2. Data Source & Universe ─────────────────────────── -->
+  <div class="accordion-item bg-transparent border-secondary border-opacity-25">
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed bg-dark text-light" type="button"
+              data-bs-toggle="collapse" data-bs-target="#sec-data">
+        <i class="bi bi-database me-2 text-info"></i>Data Source &amp; Universe
+      </button>
+    </h2>
+    <div id="sec-data" class="accordion-collapse collapse">
+      <div class="accordion-body">
+        <div class="row g-3">
+          <div class="col-sm-6">
+            <label class="form-label small text-secondary">Data Source</label>
+            <select class="form-select form-select-sm bg-dark text-light border-secondary" id="data-source">
+              <option value="yfinance"      {% if cfg.data_source == 'yfinance'      %}selected{% endif %}>
+                yfinance (free, no key needed)</option>
+              <option value="alpha_vantage" {% if cfg.data_source == 'alpha_vantage' %}selected{% endif %}>
+                Alpha Vantage (production, needs key)</option>
+            </select>
+          </div>
+          <div class="col-sm-6">
+            <label class="form-label small text-secondary">Shortlist Size (top N into AI)</label>
+            <input type="number" id="shortlist-size" min="5" max="50" step="1"
+                   class="form-control form-control-sm bg-dark text-light border-secondary"
+                   value="{{ cfg.universe.shortlist_size if cfg.universe else 20 }}">
+          </div>
+          <div class="col-12">
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" id="use-preset-n500"
+                     {% if cfg.get('use_preset_nifty500', True) %}checked{% endif %}>
+              <label class="form-check-label small" for="use-preset-n500">
+                Use preset Nifty500 list (~250 stocks from <code>core/nifty500_symbols.py</code>)
+              </label>
+            </div>
+            <div class="form-text small">
+              When off, only the symbol lists in <a href="/config/yaml" class="link-secondary">Raw YAML</a>
+              are screened. Turn off if you want to screen a custom smaller set.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 3. Fundamental Filters ───────────────────────────── -->
+  <div class="accordion-item bg-transparent border-secondary border-opacity-25">
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed bg-dark text-light" type="button"
+              data-bs-toggle="collapse" data-bs-target="#sec-fund">
+        <i class="bi bi-clipboard-data me-2 text-success"></i>Fundamental Filters (Stage 1)
+      </button>
+    </h2>
+    <div id="sec-fund" class="accordion-collapse collapse">
+      <div class="accordion-body">
+        <p class="small text-secondary">
+          Applied to all ~250 symbols before technical screening. Results cached for
+          <strong class="text-light">cache_hours</strong> hours — no need to re-fetch every run.
+          D/E filter is automatically skipped for Banking, Insurance, and Financial sectors.
+        </p>
+        <div class="row g-3">
+          {% set f = cfg.fundamentals.filters if cfg.fundamentals and cfg.fundamentals.filters else {} %}
+          {% set fm = cfg.fundamentals if cfg.fundamentals else {} %}
+          <div class="col-sm-6 col-lg-4">
+            <label class="form-label small text-secondary">Min Market Cap (₹ Crores)</label>
+            <input type="number" id="f-mincap" min="100" max="50000" step="100"
+                   class="form-control form-control-sm bg-dark text-light border-secondary"
+                   value="{{ f.get('min_market_cap_cr', 500) }}">
+            <div class="form-text small">Filters out micro-caps</div>
+          </div>
+          <div class="col-sm-6 col-lg-4">
+            <label class="form-label small text-secondary">Max Debt-to-Equity (%)</label>
+            <input type="number" id="f-maxde" min="0" max="1000" step="10"
+                   class="form-control form-control-sm bg-dark text-light border-secondary"
+                   value="{{ f.get('max_debt_to_equity', 200) }}">
+            <div class="form-text small">yfinance returns D/E as %; 200 = 2.0× ratio</div>
+          </div>
+          <div class="col-sm-6 col-lg-4">
+            <label class="form-label small text-secondary">Min Revenue Growth (YoY %)</label>
+            <input type="number" id="f-minrevg" min="-100" max="100" step="1"
+                   class="form-control form-control-sm bg-dark text-light border-secondary"
+                   value="{{ ((f.get('min_revenue_growth', -0.15)) * 100) | round(0) | int }}">
+            <div class="form-text small">e.g. -15 allows up to 15% revenue decline</div>
+          </div>
+          <div class="col-sm-6 col-lg-4">
+            <label class="form-label small text-secondary">Min Return on Equity (%)</label>
+            <input type="number" id="f-minroe" min="-50" max="100" step="1"
+                   class="form-control form-control-sm bg-dark text-light border-secondary"
+                   value="{{ ((f.get('min_roe', 0.05)) * 100) | round(0) | int }}">
+            <div class="form-text small">Companies below this ROE are excluded</div>
+          </div>
+          <div class="col-sm-6 col-lg-4">
+            <label class="form-label small text-secondary">Cache Duration (hours)</label>
+            <input type="number" id="f-cache" min="1" max="168" step="1"
+                   class="form-control form-control-sm bg-dark text-light border-secondary"
+                   value="{{ fm.get('cache_hours', 24) }}">
+            <div class="form-text small">Reuse fundamental data within this window</div>
+          </div>
+          <div class="col-sm-6 col-lg-4">
+            <label class="form-label small text-secondary">Parallel Workers</label>
+            <input type="number" id="f-workers" min="1" max="8" step="1"
+                   class="form-control form-control-sm bg-dark text-light border-secondary"
+                   value="{{ fm.get('max_workers', 4) }}">
+            <div class="form-text small">Concurrent yfinance fetches — keep ≤4 on Pi</div>
+          </div>
+          <div class="col-12">
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" id="f-poscf"
+                     {% if f.get('require_positive_cashflow') %}checked{% endif %}>
+              <label class="form-check-label small" for="f-poscf">
+                Require positive operating cash flow (stricter — may over-filter)
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 4. Technical Screening ───────────────────────────── -->
+  <div class="accordion-item bg-transparent border-secondary border-opacity-25">
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed bg-dark text-light" type="button"
+              data-bs-toggle="collapse" data-bs-target="#sec-tech">
+        <i class="bi bi-bar-chart-line me-2 text-primary"></i>Technical Screen (Stage 2)
+      </button>
+    </h2>
+    <div id="sec-tech" class="accordion-collapse collapse">
+      <div class="accordion-body">
+        {% set sc = cfg.screening if cfg.screening else {} %}
+        {% set tc = sc.get('technical', {}) %}
+        {% set mc = sc.get('momentum', {}) %}
+        {% set sw = sc.get('scoring_weights', {}) %}
+        <div class="row g-3">
+          <div class="col-sm-6 col-lg-3">
+            <label class="form-label small text-secondary">RSI Minimum</label>
+            <input type="number" id="t-rsimin" min="10" max="50" step="1"
+                   class="form-control form-control-sm bg-dark text-light border-secondary"
+                   value="{{ tc.get('rsi_min', 35) }}">
+          </div>
+          <div class="col-sm-6 col-lg-3">
+            <label class="form-label small text-secondary">RSI Maximum</label>
+            <input type="number" id="t-rsimax" min="60" max="90" step="1"
+                   class="form-control form-control-sm bg-dark text-light border-secondary"
+                   value="{{ tc.get('rsi_max', 72) }}">
+          </div>
+          <div class="col-sm-6 col-lg-3">
+            <label class="form-label small text-secondary">ADX Minimum (trend strength)</label>
+            <input type="number" id="t-adxmin" min="10" max="40" step="1"
+                   class="form-control form-control-sm bg-dark text-light border-secondary"
+                   value="{{ tc.get('adx_min', 20) }}">
+          </div>
+          <div class="col-sm-6 col-lg-3">
+            <label class="form-label small text-secondary">Momentum Lookback (days)</label>
+            <input type="number" id="t-lbdays" min="60" max="365" step="1"
+                   class="form-control form-control-sm bg-dark text-light border-secondary"
+                   value="{{ mc.get('lookback_days', 252) }}">
+          </div>
+          <div class="col-12">
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" id="t-ema200"
+                     {% if tc.get('ema_above_200', True) %}checked{% endif %}>
+              <label class="form-check-label small" for="t-ema200">
+                Only screen stocks above their 200-day EMA (recommended)
+              </label>
+            </div>
+          </div>
+          <div class="col-12">
+            <label class="form-label small text-secondary mb-2">
+              Scoring Weights
+              <span class="ms-2 text-warning small" id="weight-warn" style="display:none">
+                ⚠ Weights must sum to 1.0
+              </span>
+            </label>
+            <div class="row g-2">
+              {% for wid, label, default in [
+                ('w-mom', 'Momentum',    sw.get('momentum_score', 0.40)),
+                ('w-rsi', 'RSI Quality', sw.get('rsi_score',      0.20)),
+                ('w-adx', 'Trend (ADX)', sw.get('adx_score',      0.20)),
+                ('w-vol', 'Volume (OBV)',sw.get('volume_score',    0.20)),
+              ] %}
+              <div class="col-sm-6 col-lg-3">
+                <label class="small text-secondary">{{ label }}</label>
+                <input type="number" id="{{ wid }}" min="0" max="1" step="0.05"
+                       class="form-control form-control-sm bg-dark text-light border-secondary weight-input"
+                       value="{{ default }}">
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 5. News ───────────────────────────────────────────── -->
+  <div class="accordion-item bg-transparent border-secondary border-opacity-25">
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed bg-dark text-light" type="button"
+              data-bs-toggle="collapse" data-bs-target="#sec-news">
+        <i class="bi bi-newspaper me-2 text-secondary"></i>News (Stage 3)
+      </button>
+    </h2>
+    <div id="sec-news" class="accordion-collapse collapse">
+      <div class="accordion-body">
+        <p class="small text-secondary">
+          NewsData.io free plan: <strong class="text-light">200 credits/day</strong>.
+          News is fetched <em>only for the final shortlist</em>, not all screened stocks.
+        </p>
+        {% set nc = cfg.news if cfg.news else {} %}
+        <div class="row g-3">
+          <div class="col-sm-6">
+            <label class="form-label small text-secondary">Max Credits per Run</label>
+            <input type="number" id="n-maxcred" min="1" max="200" step="1"
+                   class="form-control form-control-sm bg-dark text-light border-secondary"
+                   value="{{ nc.get('max_credits_per_run', 25) }}">
+            <div class="form-text small">Keep below 70 to leave budget for 3 runs/day</div>
+          </div>
+          <div class="col-sm-6">
+            <label class="form-label small text-secondary">Articles per Stock</label>
+            <input type="number" id="n-artpersym" min="1" max="10" step="1"
+                   class="form-control form-control-sm bg-dark text-light border-secondary"
+                   value="{{ nc.get('articles_per_symbol', 5) }}">
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 6. Groq AI ─────────────────────────────────────────── -->
+  <div class="accordion-item bg-transparent border-secondary border-opacity-25">
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed bg-dark text-light" type="button"
+              data-bs-toggle="collapse" data-bs-target="#sec-groq">
+        <i class="bi bi-robot me-2 text-info"></i>Groq AI Analysis (Stage 4)
+      </button>
+    </h2>
+    <div id="sec-groq" class="accordion-collapse collapse">
+      <div class="accordion-body">
+        {% set gc = cfg.groq if cfg.groq else {} %}
+        <div class="row g-3">
+          <div class="col-sm-6">
+            <label class="form-label small text-secondary">Model</label>
+            <select id="g-model" class="form-select form-select-sm bg-dark text-light border-secondary">
+              {% for m in ['llama-3.3-70b-versatile', 'llama-3.1-70b-versatile',
+                           'mixtral-8x7b-32768', 'gemma2-9b-it'] %}
+              <option value="{{ m }}" {% if gc.get('model') == m %}selected{% endif %}>{{ m }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-sm-6">
+            <label class="form-label small text-secondary">Max Tokens</label>
+            <input type="number" id="g-maxtok" min="512" max="4096" step="128"
+                   class="form-control form-control-sm bg-dark text-light border-secondary"
+                   value="{{ gc.get('max_tokens', 2048) }}">
+          </div>
+          <div class="col-12">
+            <label class="form-label small text-secondary d-flex justify-content-between">
+              <span>Temperature (creativity)</span>
+              <span id="g-temp-val" class="text-light">{{ gc.get('temperature', 0.2) }}</span>
+            </label>
+            <input type="range" id="g-temp" min="0" max="1" step="0.05"
+                   class="form-range"
+                   value="{{ gc.get('temperature', 0.2) }}"
+                   oninput="document.getElementById('g-temp-val').textContent=this.value">
+            <div class="d-flex justify-content-between">
+              <span class="small text-secondary">0 — Deterministic</span>
+              <span class="small text-secondary">1 — Creative</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 7. Schedule ────────────────────────────────────────── -->
+  <div class="accordion-item bg-transparent border-secondary border-opacity-25">
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed bg-dark text-light" type="button"
+              data-bs-toggle="collapse" data-bs-target="#sec-sched">
+        <i class="bi bi-clock me-2 text-warning"></i>Schedule
+      </button>
+    </h2>
+    <div id="sec-sched" class="accordion-collapse collapse">
+      <div class="accordion-body">
+        {% set sch = cfg.schedule if cfg.schedule else {} %}
+        <div class="d-flex align-items-center gap-3 mb-3">
+          <div class="form-check form-switch mb-0">
+            <input class="form-check-input" type="checkbox" id="sched-enabled"
+                   {% if sch.get('enabled', True) %}checked{% endif %}>
+            <label class="form-check-label small" for="sched-enabled">Enable scheduled jobs</label>
+          </div>
+          <div>
+            <label class="small text-secondary me-2">Timezone:</label>
+            <select id="sched-tz" class="form-select form-select-sm d-inline-block w-auto
+                                          bg-dark text-light border-secondary">
+              {% for tz in ['Asia/Kolkata', 'UTC', 'Asia/Dubai', 'Asia/Singapore'] %}
+              <option value="{{ tz }}" {% if sch.get('timezone','Asia/Kolkata') == tz %}selected{% endif %}>
+                {{ tz }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+
+        <div id="jobs-container" class="d-flex flex-column gap-2"></div>
+        <button type="button" class="btn btn-outline-secondary btn-sm mt-2" onclick="addJobCard()">
+          <i class="bi bi-plus-lg me-1"></i>Add Job
+        </button>
+
+        <script>
+        const TASK_OPTIONS = [
+          {value:'fundamentals',       label:'Fundamentals (quality filter)'},
+          {value:'screen',             label:'Technical Screen'},
+          {value:'news',               label:'News Fetch'},
+          {value:'ai_analysis',        label:'AI Analysis'},
+          {value:'earnings_dashboard', label:'Earnings Dashboard'},
+          {value:'telegram_report',    label:'Telegram Report'},
+        ];
+
+        function addJobCard(name='', time='', tasks=[]) {
+          const idx = document.querySelectorAll('.job-card').length;
+          const taskChecks = TASK_OPTIONS.map(t => `
+            <div class="form-check form-check-inline">
+              <input class="form-check-input job-task" type="checkbox" value="${t.value}"
+                     id="jt-${idx}-${t.value}"
+                     ${tasks.includes(t.value) ? 'checked' : ''}>
+              <label class="form-check-label small" for="jt-${idx}-${t.value}">${t.label}</label>
+            </div>`).join('');
+
+          const card = document.createElement('div');
+          card.className = 'card border-secondary border-opacity-25 job-card';
+          card.innerHTML = `
+            <div class="card-body py-2 px-3">
+              <div class="row g-2 align-items-center mb-2">
+                <div class="col-sm-4">
+                  <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary job-name"
+                         placeholder="Job name (e.g. morning_scan)" value="${name}">
+                </div>
+                <div class="col-sm-3">
+                  <input type="time" class="form-control form-control-sm bg-dark text-light border-secondary job-time"
+                         value="${time}">
+                </div>
+                <div class="col-sm-5 text-end">
+                  <button type="button" class="btn btn-outline-danger btn-sm py-0"
+                          onclick="this.closest('.job-card').remove()">
+                    <i class="bi bi-trash"></i> Remove
+                  </button>
+                </div>
+              </div>
+              <div class="d-flex flex-wrap gap-1">${taskChecks}</div>
+            </div>`;
+          document.getElementById('jobs-container').appendChild(card);
+        }
+
+        // Pre-populate existing jobs
+        const existingJobs = {{ (cfg.schedule.jobs if cfg.schedule and cfg.schedule.jobs else []) | tojson }};
+        existingJobs.forEach(j => addJobCard(j.name, j.time, j.tasks || []));
+        </script>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 8. Telegram ────────────────────────────────────────── -->
+  <div class="accordion-item bg-transparent border-secondary border-opacity-25">
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed bg-dark text-light" type="button"
+              data-bs-toggle="collapse" data-bs-target="#sec-tg">
+        <i class="bi bi-telegram me-2" style="color:#29b6f6"></i>Telegram Notifications
+      </button>
+    </h2>
+    <div id="sec-tg" class="accordion-collapse collapse">
+      <div class="accordion-body">
+        {% set tg = cfg.telegram if cfg.telegram else {} %}
+        <div class="row g-3">
+          <div class="col-12">
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" id="tg-enabled"
+                     {% if tg.get('enabled') %}checked{% endif %}>
+              <label class="form-check-label small" for="tg-enabled">
+                Enable Telegram notifications
+              </label>
+            </div>
+          </div>
+          <div class="col-12">
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" id="tg-earnings"
+                     {% if tg.get('send_earnings_alerts', True) %}checked{% endif %}>
+              <label class="form-check-label small" for="tg-earnings">
+                Send earnings alerts
+              </label>
+            </div>
+          </div>
+          <div class="col-sm-6">
+            <label class="form-label small text-secondary">Max stocks per message</label>
+            <input type="number" id="tg-maxstocks" min="1" max="20" step="1"
+                   class="form-control form-control-sm bg-dark text-light border-secondary"
+                   value="{{ tg.get('max_stocks_in_message', 10) }}">
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 9. Logging ─────────────────────────────────────────── -->
+  <div class="accordion-item bg-transparent border-secondary border-opacity-25">
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed bg-dark text-light" type="button"
+              data-bs-toggle="collapse" data-bs-target="#sec-log">
+        <i class="bi bi-journal-text me-2 text-secondary"></i>Logging
+      </button>
+    </h2>
+    <div id="sec-log" class="accordion-collapse collapse">
+      <div class="accordion-body">
+        {% set lg = cfg.logging if cfg.logging else {} %}
+        <div class="row g-3">
+          <div class="col-sm-4">
+            <label class="form-label small text-secondary">Log Level</label>
+            <select id="log-level" class="form-select form-select-sm bg-dark text-light border-secondary">
+              {% for lv in ['DEBUG','INFO','WARNING','ERROR'] %}
+              <option value="{{ lv }}" {% if lg.get('level','INFO') == lv %}selected{% endif %}>{{ lv }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- end accordion -->
+
+<!-- Save / Advanced bar -->
+<div class="d-flex gap-2 align-items-center mt-4 py-3 border-top border-secondary border-opacity-25">
+  <button class="btn btn-primary" onclick="saveCfg()">
+    <i class="bi bi-floppy me-1"></i>Save Configuration
+  </button>
+  <a href="/config/yaml" class="btn btn-outline-secondary">
+    <i class="bi bi-code-slash me-1"></i>Advanced: Raw YAML
+  </a>
+  <span class="text-secondary small ms-2">Symbol lists &amp; advanced settings are in Raw YAML only.</span>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function togglePw(id) {
+  const el = document.getElementById(id);
+  const eye = document.getElementById(id + '-eye');
+  if (el.type === 'password') {
+    el.type = 'text';
+    eye.classList.replace('bi-eye', 'bi-eye-slash');
+  } else {
+    el.type = 'password';
+    eye.classList.replace('bi-eye-slash', 'bi-eye');
+  }
+}
+
+// Warn if scoring weights don't sum to 1.0
+document.querySelectorAll('.weight-input').forEach(el =>
+  el.addEventListener('input', checkWeights)
+);
+function checkWeights() {
+  const total = ['w-mom','w-rsi','w-adx','w-vol']
+    .reduce((s, id) => s + (parseFloat(document.getElementById(id)?.value) || 0), 0);
+  const warn = document.getElementById('weight-warn');
+  if (warn) warn.style.display = Math.abs(total - 1.0) > 0.01 ? '' : 'none';
+}
+
+function collectConfig() {
+  // Start from the full embedded config so untouched fields (symbol lists etc.) are preserved
+  const cfg = JSON.parse(JSON.stringify(CFG));
+
+  // ── API Keys ──
+  cfg.api_keys.alpha_vantage = document.getElementById('k-av').value;
+  cfg.api_keys.newsdata_io   = document.getElementById('k-nd').value;
+  cfg.api_keys.groq          = document.getElementById('k-groq').value;
+  cfg.api_keys.telegram_bot  = document.getElementById('k-tgbot').value;
+  cfg.api_keys.telegram_chat = document.getElementById('k-tgchat').value;
+
+  // ── Data & Universe ──
+  cfg.data_source         = document.getElementById('data-source').value;
+  cfg.use_preset_nifty500 = document.getElementById('use-preset-n500').checked;
+  if (!cfg.universe) cfg.universe = {};
+  cfg.universe.shortlist_size = parseInt(document.getElementById('shortlist-size').value) || 20;
+
+  // ── Fundamentals ──
+  if (!cfg.fundamentals)         cfg.fundamentals = {};
+  if (!cfg.fundamentals.filters) cfg.fundamentals.filters = {};
+  cfg.fundamentals.cache_hours   = parseInt(document.getElementById('f-cache').value) || 24;
+  cfg.fundamentals.max_workers   = parseInt(document.getElementById('f-workers').value) || 4;
+  cfg.fundamentals.filters.min_market_cap_cr      = parseInt(document.getElementById('f-mincap').value) || 500;
+  cfg.fundamentals.filters.max_debt_to_equity     = parseInt(document.getElementById('f-maxde').value) || 200;
+  cfg.fundamentals.filters.min_revenue_growth     = (parseFloat(document.getElementById('f-minrevg').value) || -15) / 100;
+  cfg.fundamentals.filters.min_roe                = (parseFloat(document.getElementById('f-minroe').value) || 5) / 100;
+  cfg.fundamentals.filters.require_positive_cashflow = document.getElementById('f-poscf').checked;
+
+  // ── Technical ──
+  if (!cfg.screening)              cfg.screening = {};
+  if (!cfg.screening.technical)    cfg.screening.technical = {};
+  if (!cfg.screening.momentum)     cfg.screening.momentum = {};
+  if (!cfg.screening.scoring_weights) cfg.screening.scoring_weights = {};
+  cfg.screening.technical.rsi_min      = parseInt(document.getElementById('t-rsimin').value) || 35;
+  cfg.screening.technical.rsi_max      = parseInt(document.getElementById('t-rsimax').value) || 72;
+  cfg.screening.technical.adx_min      = parseInt(document.getElementById('t-adxmin').value) || 20;
+  cfg.screening.technical.ema_above_200 = document.getElementById('t-ema200').checked;
+  cfg.screening.momentum.lookback_days  = parseInt(document.getElementById('t-lbdays').value) || 252;
+  cfg.screening.scoring_weights.momentum_score = parseFloat(document.getElementById('w-mom').value) || 0.4;
+  cfg.screening.scoring_weights.rsi_score      = parseFloat(document.getElementById('w-rsi').value) || 0.2;
+  cfg.screening.scoring_weights.adx_score      = parseFloat(document.getElementById('w-adx').value) || 0.2;
+  cfg.screening.scoring_weights.volume_score   = parseFloat(document.getElementById('w-vol').value) || 0.2;
+
+  // ── News ──
+  if (!cfg.news) cfg.news = {};
+  cfg.news.max_credits_per_run  = parseInt(document.getElementById('n-maxcred').value) || 25;
+  cfg.news.articles_per_symbol  = parseInt(document.getElementById('n-artpersym').value) || 5;
+
+  // ── Groq ──
+  if (!cfg.groq) cfg.groq = {};
+  cfg.groq.model      = document.getElementById('g-model').value;
+  cfg.groq.max_tokens = parseInt(document.getElementById('g-maxtok').value) || 2048;
+  cfg.groq.temperature = parseFloat(document.getElementById('g-temp').value) || 0.2;
+
+  // ── Schedule ──
+  if (!cfg.schedule) cfg.schedule = {};
+  cfg.schedule.enabled  = document.getElementById('sched-enabled').checked;
+  cfg.schedule.timezone = document.getElementById('sched-tz').value;
+  cfg.schedule.jobs = [];
+  document.querySelectorAll('.job-card').forEach(card => {
+    const name  = card.querySelector('.job-name').value.trim();
+    const time  = card.querySelector('.job-time').value;
+    const tasks = [...card.querySelectorAll('.job-task:checked')].map(cb => cb.value);
+    if (name && time) cfg.schedule.jobs.push({name, time, tasks});
+  });
+
+  // ── Telegram ──
+  if (!cfg.telegram) cfg.telegram = {};
+  cfg.telegram.enabled              = document.getElementById('tg-enabled').checked;
+  cfg.telegram.send_earnings_alerts = document.getElementById('tg-earnings').checked;
+  cfg.telegram.max_stocks_in_message = parseInt(document.getElementById('tg-maxstocks').value) || 10;
+
+  // ── Logging ──
+  if (!cfg.logging) cfg.logging = {};
+  cfg.logging.level = document.getElementById('log-level').value;
+
+  return cfg;
+}
+
+async function saveCfg() {
+  const banner = document.getElementById('save-result');
+  banner.className = 'alert alert-info mb-3';
+  banner.classList.remove('d-none');
+  banner.innerHTML = '<i class="bi bi-hourglass me-2"></i>Saving…';
+
+  try {
+    const cfg = collectConfig();
+    const r = await fetch('/config/save', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(cfg),
+    });
+    const d = await r.json();
+    if (r.ok && d.ok) {
+      banner.className = 'alert alert-success mb-3';
+      banner.innerHTML = `<i class="bi bi-check-circle me-2"></i>${d.message}`;
+    } else {
+      banner.className = 'alert alert-danger mb-3';
+      banner.innerHTML = `<i class="bi bi-exclamation-triangle me-2"></i>${d.error || 'Save failed'}`;
+    }
+  } catch(e) {
+    banner.className = 'alert alert-danger mb-3';
+    banner.innerHTML = `<i class="bi bi-exclamation-triangle me-2"></i>Request failed: ${e}`;
+  }
+}
+</script>
 {% endblock %}

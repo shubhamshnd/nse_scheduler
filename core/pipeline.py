@@ -1,13 +1,13 @@
 """
 pipeline.py — Orchestrates all pipeline tasks.
-Can be triggered by the scheduler or manually via web UI.
 
-Tasks:
-  screen             → core/screener.py
-  news               → core/news_fetcher.py
-  ai_analysis        → agents/groq_agent.py
-  earnings_dashboard → core/earnings.py
-  telegram_report    → agents/telegram_notifier.py
+Task order (recommended):
+  1. fundamentals        — quality-filter all ~250 Nifty500 symbols (cached 24h)
+  2. screen              — momentum + technical score on fundamentally-sound stocks
+  3. news                — fetch news only for the top shortlist (saves NewsData credits)
+  4. ai_analysis         — Groq LLM analysis combining technicals + news
+  5. earnings_dashboard  — upcoming earnings, beat rates
+  6. telegram_report     — push results to Telegram
 """
 
 import json
@@ -17,7 +17,6 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# parent.parent: core/ → project root
 DATA_DIR = Path(__file__).parent.parent / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -41,6 +40,7 @@ def _load(name: str):
 
 
 def run_tasks(task_list: list, cfg: dict) -> dict:
+    from core.fundamentals        import screen_fundamentals
     from core.screener            import run_screener
     from core.news_fetcher        import fetch_news_for_shortlist
     from core.earnings            import get_earnings_data
@@ -48,11 +48,22 @@ def run_tasks(task_list: list, cfg: dict) -> dict:
     from agents.telegram_notifier import send_scan_report, send_earnings_alert
     import pandas as pd
 
-    status       = {}
-    shortlist_df = None
-    news_data    = None
-    analyses     = None
-    earnings     = None
+    status         = {}
+    fund_df        = None    # fundamentally-filtered universe
+    shortlist_df   = None    # technically-ranked shortlist
+    news_data      = None
+    analyses       = None
+    earnings       = None
+
+    # ── Lazy loaders from disk cache ──────────────────────────────────────────
+    def get_fund_df():
+        nonlocal fund_df
+        if fund_df is None:
+            cached = _load("fundamentals")
+            if cached:
+                fund_df = pd.DataFrame(cached)
+                logger.info(f"Loaded cached fundamentals ({len(fund_df)} stocks).")
+        return fund_df
 
     def get_shortlist():
         nonlocal shortlist_df
@@ -60,7 +71,7 @@ def run_tasks(task_list: list, cfg: dict) -> dict:
             cached = _load("shortlist")
             if cached:
                 shortlist_df = pd.DataFrame(cached)
-                logger.info("Loaded cached shortlist from disk.")
+                logger.info(f"Loaded cached shortlist ({len(shortlist_df)} stocks).")
         return shortlist_df
 
     def get_news():
@@ -69,7 +80,7 @@ def run_tasks(task_list: list, cfg: dict) -> dict:
             cached = _load("news_data")
             if cached:
                 news_data = cached
-                logger.info("Loaded cached news data from disk.")
+                logger.info("Loaded cached news data.")
         return news_data
 
     def get_analyses():
@@ -78,37 +89,60 @@ def run_tasks(task_list: list, cfg: dict) -> dict:
             cached = _load("analyses")
             if cached:
                 analyses = cached
-                logger.info("Loaded cached AI analyses from disk.")
+                logger.info(f"Loaded cached AI analyses ({len(analyses)} stocks).")
         return analyses
 
     start_ts = datetime.now().isoformat()
-    logger.info(f"Pipeline run started: tasks={task_list}")
+    logger.info(f"Pipeline run started | tasks={task_list}")
 
     for task in task_list:
         task_start = datetime.now()
         try:
-            if task == "screen":
-                logger.info("Task: screen")
-                shortlist_df = run_screener(cfg)
+
+            # ── 1. Fundamentals ───────────────────────────────────────────────
+            if task == "fundamentals":
+                logger.info("━━ Task: fundamentals (quality filter)")
+                fund_df = screen_fundamentals(cfg)
+                if fund_df is not None and not fund_df.empty:
+                    _save("fundamentals", fund_df)
+                    status[task] = {"ok": True, "passed": len(fund_df)}
+                else:
+                    status[task] = {"ok": False, "error": "No stocks passed fundamental filters"}
+
+            # ── 2. Technical screen ───────────────────────────────────────────
+            elif task == "screen":
+                logger.info("━━ Task: screen (momentum + technical)")
+                # Use fundamentally-filtered symbols if available, else config symbols
+                fd = get_fund_df()
+                if fd is not None and not fd.empty:
+                    fund_symbols = fd["symbol"].tolist()
+                    logger.info(f"  Input: {len(fund_symbols)} fundamentally-filtered symbols")
+                else:
+                    fund_symbols = None
+                    logger.info("  No fundamentals data — using config symbol list")
+                shortlist_df = run_screener(cfg, symbols=fund_symbols)
                 if shortlist_df is not None and not shortlist_df.empty:
                     _save("shortlist", shortlist_df)
                     status[task] = {"ok": True, "count": len(shortlist_df)}
                 else:
                     status[task] = {"ok": False, "error": "Screener returned empty results"}
 
+            # ── 3. News (only for the shortlisted stocks) ─────────────────────
             elif task == "news":
-                logger.info("Task: news")
+                logger.info("━━ Task: news (shortlist only)")
                 sl = get_shortlist()
                 if sl is None or sl.empty:
-                    status[task] = {"ok": False, "error": "No shortlist available"}
+                    status[task] = {"ok": False, "error": "No shortlist — run screen first"}
                     continue
                 news_data = fetch_news_for_shortlist(sl, cfg)
                 _save("news_data", news_data)
                 covered = sum(1 for v in news_data.values() if v)
-                status[task] = {"ok": True, "stocks_covered": covered}
+                status[task] = {"ok": True, "stocks_covered": covered,
+                                "total": len(sl)}
 
+            # ── 4. AI analysis ────────────────────────────────────────────────
             elif task == "ai_analysis":
-                logger.info("Task: ai_analysis")
+                logger.info("━━ Task: ai_analysis")
                 sl = get_shortlist()
                 nd = get_news()
                 if sl is None or sl.empty:
@@ -123,8 +157,9 @@ def run_tasks(task_list: list, cfg: dict) -> dict:
                     "avoid": sum(1 for a in analyses if a.get("recommendation") == "AVOID"),
                 }
 
+            # ── 5. Earnings dashboard ─────────────────────────────────────────
             elif task == "earnings_dashboard":
-                logger.info("Task: earnings_dashboard")
+                logger.info("━━ Task: earnings_dashboard")
                 sl = get_shortlist()
                 if sl is not None and not sl.empty:
                     symbols = sl["symbol"].tolist()
@@ -136,13 +171,14 @@ def run_tasks(task_list: list, cfg: dict) -> dict:
                 soon = sum(1 for e in earnings if e.get("earnings_soon"))
                 status[task] = {"ok": True, "total": len(earnings), "earnings_soon": soon}
 
+            # ── 6. Telegram report ────────────────────────────────────────────
             elif task == "telegram_report":
-                logger.info("Task: telegram_report")
+                logger.info("━━ Task: telegram_report")
+                if not cfg.get("telegram", {}).get("enabled"):
+                    status[task] = {"ok": True, "note": "Telegram disabled"}
+                    continue
                 sl = get_shortlist()
                 an = get_analyses()
-                if not cfg.get("telegram", {}).get("enabled"):
-                    status[task] = {"ok": True, "note": "Telegram disabled in config"}
-                    continue
                 if an and sl is not None and not sl.empty:
                     send_scan_report(an, sl, cfg)
                 if earnings:
@@ -159,7 +195,9 @@ def run_tasks(task_list: list, cfg: dict) -> dict:
 
         elapsed = (datetime.now() - task_start).total_seconds()
         status[task]["elapsed_s"] = round(elapsed, 1)
-        logger.info(f"  Task '{task}' done in {elapsed:.1f}s → {status[task]}")
+        ok_str = "✓" if status[task].get("ok") else "✗"
+        detail = {k: v for k, v in status[task].items() if k not in ("ok", "elapsed_s")}
+        logger.info(f"  {ok_str} '{task}' done in {elapsed:.1f}s  {detail}")
 
     run_log = {
         "started_at":  start_ts,
@@ -168,5 +206,5 @@ def run_tasks(task_list: list, cfg: dict) -> dict:
         "status":      status,
     }
     _save("last_run", run_log)
-    logger.info(f"Pipeline run complete: {status}")
+    logger.info(f"Pipeline complete | {' | '.join(f'{t}:{'OK' if s.get('ok') else 'FAIL'}' for t,s in status.items())}")
     return status
