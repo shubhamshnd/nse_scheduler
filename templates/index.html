@@ -22,7 +22,7 @@
   <div class="col-6 col-sm-3 col-lg">
     <div class="card text-center py-3">
       <div class="fs-3 fw-bold text-secondary" id="stat-universe">
-        {{ cfg.get('use_preset_nifty500', False) | ternary('~250','—') }}
+        {% if cfg.get('use_preset_nifty500', False) %}~250{% else %}—{% endif %}
       </div>
       <div class="small text-secondary">Universe</div>
     </div>

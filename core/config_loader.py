@@ -5,10 +5,15 @@ Provides module-level CFG singleton (used by run.py).
 
 import logging
 import logging.handlers
+import os
 import re
 from pathlib import Path
 
 import yaml
+from dotenv import load_dotenv
+
+# Load .env from project root (safe no-op if file doesn't exist)
+load_dotenv(Path(__file__).parent.parent / ".env")
 
 logger = logging.getLogger(__name__)
 
@@ -39,10 +44,28 @@ class _CleanFilter(logging.Filter):
         return True
 
 
+def _apply_env_overrides(cfg: dict):
+    """Overlay API keys from environment / .env file onto the loaded config."""
+    keys = cfg.setdefault("api_keys", {})
+    mapping = {
+        "GROQ_API_KEY":        "groq",
+        "NEWSDATA_API_KEY":    "newsdata_io",
+        "TELEGRAM_BOT_TOKEN":  "telegram_bot",
+        "TELEGRAM_CHAT_ID":    "telegram_chat",
+        "ALPHA_VANTAGE_KEY":   "alpha_vantage",
+    }
+    for env_var, cfg_key in mapping.items():
+        val = os.getenv(env_var)
+        if val:
+            keys[cfg_key] = val
+
+
 def load_config(path=None) -> dict:
     p = Path(path) if path else DEFAULT_CFG_PATH
     with open(p, encoding="utf-8-sig") as f:  # utf-8-sig strips BOM if present
-        return yaml.safe_load(f)
+        cfg = yaml.safe_load(f)
+    _apply_env_overrides(cfg)
+    return cfg
 
 
 def save_config(cfg: dict, path=None):

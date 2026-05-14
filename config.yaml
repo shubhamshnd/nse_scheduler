@@ -1,32 +1,26 @@
 # ============================================================
 #  NIFTY PIPELINE — MASTER CONFIGURATION
-#  Edit this file to configure all pipeline behaviour.
-#  No code changes needed for normal operation.
 # ============================================================
 
 # ── API Keys ────────────────────────────────────────────────
 api_keys:
-  alpha_vantage: "YOUR_ALPHA_VANTAGE_KEY"
-  newsdata_io:   "YOUR_NEWSDATA_IO_KEY"
-  groq:          "YOUR_GROQ_API_KEY"
-  telegram_bot:  "YOUR_TELEGRAM_BOT_TOKEN"
-  telegram_chat: "YOUR_TELEGRAM_CHAT_ID"
+  alpha_vantage: ""
+  newsdata_io: ""
+  groq: ""
+  telegram_bot: ""
+  telegram_chat: ""
+  # Keys are loaded from .env — see .env.example
 
 # ── Data Source Toggle ───────────────────────────────────────
-# "yfinance"       → free, no key needed (default / testing)
-# "alpha_vantage"  → production, needs key above
 data_source: "yfinance"
 
 # ── Universe ─────────────────────────────────────────────────
-# Set use_preset_nifty500: true to use the full ~250-symbol list
-# in core/nifty500_symbols.py instead of the manual list below.
 use_preset_nifty500: true
 
 universe:
-  shortlist_size: 20          # top N stocks carried into news + AI
-  min_market_cap_cr: 500      # fallback filter (also in fundamentals section)
+  shortlist_size: 20
+  min_market_cap_cr: 500
 
-  # Manual symbol lists — only used when use_preset_nifty500: false
   symbols_yfinance:
     - "RELIANCE.NS"
     - "TCS.NS"
@@ -57,6 +51,7 @@ universe:
     - "ADANIPORTS.NS"
     - "JSWSTEEL.NS"
     - "TATASTEEL.NS"
+    - "TATAMOTORS.NS"
     - "M&M.NS"
     - "BAJAJFINSV.NS"
     - "INDUSINDBK.NS"
@@ -77,7 +72,6 @@ universe:
     - "GODREJCP.NS"
     - "APOLLOHOSP.NS"
     - "BAJAJ-AUTO.NS"
-    - "TATAMOTORS.NS"
 
   symbols_alpha_vantage:
     - "RELIANCE.BSE"
@@ -87,21 +81,17 @@ universe:
     - "ICICIBANK.BSE"
 
 # ── Fundamental Quality Filter ───────────────────────────────
-# Stage 1: runs over all ~250 Nifty500 symbols.
-# Passes only financially sound companies into the technical screener.
 fundamentals:
-  cache_hours: 24             # reuse cached results within this window
-  max_workers: 4              # parallel yfinance fetches (keep ≤5 on Pi)
+  cache_hours: 24
+  max_workers: 4
   filters:
-    min_market_cap_cr: 500    # minimum market cap in Crores INR
-    max_debt_to_equity: 200   # yfinance returns D/E as % (200 = 2.0x ratio)
-                              # D/E filter is SKIPPED for Financial/Banking sectors
-    min_revenue_growth: -0.15 # allow up to -15% YoY revenue decline
-    min_roe: 0.05             # minimum 5% Return on Equity
-    require_positive_cashflow: false  # set true for stricter filter
+    min_market_cap_cr: 500
+    max_debt_to_equity: 200
+    min_revenue_growth: -0.15
+    min_roe: 0.05
+    require_positive_cashflow: false
 
 # ── Screening Filters ────────────────────────────────────────
-# Stage 2: technical momentum + indicator scoring
 screening:
   momentum:
     lookback_days: 252
@@ -113,14 +103,13 @@ screening:
     ema_above_200: true
   scoring_weights:
     momentum_score: 0.40
-    rsi_score:      0.20
-    adx_score:      0.20
-    volume_score:   0.20
+    rsi_score: 0.20
+    adx_score: 0.20
+    volume_score: 0.20
 
 # ── News Fetch ───────────────────────────────────────────────
-# Stage 3: only for the top shortlist (saves NewsData credits)
 news:
-  max_credits_per_run: 25     # shortlist_size ≤ this keeps you well within budget
+  max_credits_per_run: 30
   articles_per_symbol: 5
   language: "en"
   sentiment_confidence_threshold: 0.55
@@ -131,25 +120,24 @@ groq:
   max_tokens: 2048
   temperature: 0.2
 
-# ── Schedule (24h format, Asia/Kolkata timezone) ─────────────
+# ── Schedule ─────────────────────────────────────────────────
 schedule:
   enabled: true
   timezone: "Asia/Kolkata"
   jobs:
     - name: "morning_scan"
-      time: "07:45"           # early start — fundamentals takes ~5 min
+      time: "05:30"
       tasks: ["fundamentals", "screen", "news", "ai_analysis", "telegram_report"]
     - name: "earnings_check"
       time: "09:15"
       tasks: ["earnings_dashboard", "telegram_report"]
     - name: "evening_review"
-      time: "15:45"           # before market close
+      time: "16:30"
       tasks: ["screen", "news", "ai_analysis", "telegram_report"]
-      # note: fundamentals omitted here — uses cached data from morning run
 
 # ── Telegram Report ──────────────────────────────────────────
 telegram:
-  enabled: false              # set true once bot token + chat_id are filled in
+  enabled: false
   send_on_scan_complete: true
   send_earnings_alerts: true
   max_stocks_in_message: 10
@@ -157,7 +145,7 @@ telegram:
 # ── Web Dashboard ────────────────────────────────────────────
 web:
   host: "0.0.0.0"
-  port: 5000
+  port: 5001
   debug: false
   secret_key: "change_this_to_a_random_string"
 
