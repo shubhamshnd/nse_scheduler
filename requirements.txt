@@ -1,0 +1,24 @@
+# Nifty Pipeline — Python Dependencies
+# Install: pip install -r requirements.txt
+
+# Web framework
+flask>=3.0.0
+
+# Scheduling
+APScheduler>=3.10.0
+pytz>=2024.1
+
+# Data fetching
+yfinance>=0.2.40
+requests>=2.31.0
+pandas>=2.1.0
+numpy>=1.26.0
+
+# Config
+pyyaml>=6.0.1
+
+# Groq (optional — uses direct HTTP, no SDK needed)
+# groq>=0.9.0   # uncomment if you prefer the official SDK
+
+# Telegram (optional — uses direct HTTP, no SDK needed)
+# python-telegram-bot>=20.0  # uncomment if you prefer the official SDK

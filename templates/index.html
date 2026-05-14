@@ -1,0 +1,253 @@
+{% extends "base.html" %}
+{% set active = "index" %}
+
+{% block title %}Dashboard — Nifty Pipeline{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-4">
+  <h5 class="mb-0 fw-semibold">Dashboard</h5>
+  {% if last_run %}
+  <span class="text-secondary small">
+    Last run: {{ last_run.finished_at[:16].replace('T',' ') if last_run.finished_at else '—' }}
+  </span>
+  {% endif %}
+</div>
+
+<!-- ── Stat Cards ───────────────────────────────────────────────────────────── -->
+<div class="row g-3 mb-4">
+  {% set buy_n  = analyses | selectattr('recommendation','equalto','BUY')  | list | length %}
+  {% set hold_n = analyses | selectattr('recommendation','equalto','HOLD') | list | length %}
+  {% set avoid_n= analyses | selectattr('recommendation','equalto','AVOID')| list | length %}
+
+  <div class="col-6 col-sm-3">
+    <div class="card text-center py-3 border-success border-opacity-50">
+      <div class="fs-2 fw-bold text-success">{{ buy_n }}</div>
+      <div class="small text-secondary">BUY signals</div>
+    </div>
+  </div>
+  <div class="col-6 col-sm-3">
+    <div class="card text-center py-3 border-warning border-opacity-50">
+      <div class="fs-2 fw-bold text-warning">{{ hold_n }}</div>
+      <div class="small text-secondary">HOLD</div>
+    </div>
+  </div>
+  <div class="col-6 col-sm-3">
+    <div class="card text-center py-3 border-danger border-opacity-50">
+      <div class="fs-2 fw-bold text-danger">{{ avoid_n }}</div>
+      <div class="small text-secondary">AVOID</div>
+    </div>
+  </div>
+  <div class="col-6 col-sm-3">
+    <div class="card text-center py-3">
+      <div class="fs-2 fw-bold text-info">{{ shortlist | length }}</div>
+      <div class="small text-secondary">Screened</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Action Buttons ──────────────────────────────────────────────────────── -->
+<div class="d-flex flex-wrap gap-2 mb-4">
+  <button class="btn btn-primary btn-sm" onclick="triggerRun('full')">
+    <i class="bi bi-play-fill me-1"></i>Full Pipeline
+  </button>
+  <button class="btn btn-outline-secondary btn-sm" onclick="triggerRun('scan_only')">
+    <i class="bi bi-funnel me-1"></i>Screen + AI
+  </button>
+  <button class="btn btn-outline-secondary btn-sm" onclick="triggerRun('screen')">
+    <i class="bi bi-search me-1"></i>Screen Only
+  </button>
+  <button class="btn btn-outline-secondary btn-sm" onclick="triggerRun('earnings')">
+    <i class="bi bi-calendar3 me-1"></i>Earnings
+  </button>
+  <button class="btn btn-outline-secondary btn-sm" onclick="triggerRun('telegram')">
+    <i class="bi bi-send me-1"></i>Send Telegram
+  </button>
+</div>
+
+<!-- ── Toast ──────────────────────────────────────────────────────────────── -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index:1100">
+  <div id="toast" class="toast align-items-center" role="alert">
+    <div class="d-flex">
+      <div class="toast-body" id="toast-body"></div>
+      <button type="button" class="btn-close me-2 m-auto" data-bs-dismiss="toast"></button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Scheduled Jobs ─────────────────────────────────────────────────────── -->
+{% if jobs %}
+<div class="card mb-4">
+  <div class="card-header py-2 d-flex align-items-center gap-2">
+    <i class="bi bi-clock-history text-secondary"></i>
+    <span class="fw-semibold small">Scheduled Jobs</span>
+  </div>
+  <div class="card-body p-0">
+    <table class="table table-sm mb-0">
+      <thead><tr><th>Job</th><th>Next Run</th></tr></thead>
+      <tbody>
+        {% for job in jobs %}
+        <tr>
+          <td class="small">{{ job.name }}</td>
+          <td class="small text-secondary">{{ job.next_run }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<!-- ── Last Run Status ────────────────────────────────────────────────────── -->
+{% if last_run and last_run.status %}
+<div class="card mb-4">
+  <div class="card-header py-2 d-flex align-items-center gap-2">
+    <i class="bi bi-info-circle text-secondary"></i>
+    <span class="fw-semibold small">Last Run Status</span>
+    <span class="ms-auto text-secondary small">{{ last_run.started_at[:16].replace('T',' ') }}</span>
+  </div>
+  <div class="card-body py-2 d-flex flex-wrap gap-2">
+    {% for task, st in last_run.status.items() %}
+    <span class="badge {% if st.ok %}bg-success{% else %}bg-danger{% endif %} bg-opacity-75">
+      {{ task }}
+      {% if st.elapsed_s is defined %}({{ st.elapsed_s }}s){% endif %}
+    </span>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<!-- ── Main Grid: Shortlist + AI Analysis ──────────────────────────────────── -->
+<div class="row g-4">
+
+  <!-- Shortlist table -->
+  <div class="col-lg-6">
+    <div class="card h-100">
+      <div class="card-header py-2">
+        <span class="fw-semibold small">
+          <i class="bi bi-bar-chart-line me-1 text-secondary"></i>Top Screened Stocks
+        </span>
+      </div>
+      {% if shortlist %}
+      <div class="table-responsive">
+        <table class="table table-sm table-hover mb-0">
+          <thead>
+            <tr>
+              <th>#</th><th>Symbol</th><th>Close</th>
+              <th>Momentum</th><th>RSI</th><th>ADX</th><th>Score</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for s in shortlist %}
+            <tr>
+              <td class="text-secondary">{{ s.rank }}</td>
+              <td class="fw-semibold">{{ s.symbol.split('.')[0] }}</td>
+              <td>₹{{ s.last_close }}</td>
+              <td class="{% if s.momentum_ret > 0 %}text-success{% else %}text-danger{% endif %}">
+                {{ '%+.1f'|format(s.momentum_ret) }}%
+              </td>
+              <td>{{ '%.1f'|format(s.rsi) }}</td>
+              <td>{{ '%.1f'|format(s.adx) }}</td>
+              <td>
+                <div class="d-flex align-items-center gap-2">
+                  <div class="score-track flex-fill">
+                    <div class="score-fill" style="width:{{ (s.composite_score * 100)|round|int }}%"></div>
+                  </div>
+                  <span class="small text-secondary">{{ '%.2f'|format(s.composite_score) }}</span>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="card-body text-center text-secondary py-5">
+        <i class="bi bi-inbox fs-1 d-block mb-2"></i>
+        No screened data yet. Run the screener to populate.
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- AI Analysis -->
+  <div class="col-lg-6">
+    <div class="card h-100">
+      <div class="card-header py-2">
+        <span class="fw-semibold small">
+          <i class="bi bi-robot me-1 text-secondary"></i>AI Analysis
+        </span>
+      </div>
+      <div class="card-body p-2" style="max-height:600px; overflow-y:auto;">
+        {% if analyses %}
+          {% for a in analyses %}
+          <div class="card mb-2 border-secondary border-opacity-25">
+            <div class="card-body py-2 px-3">
+              <div class="d-flex align-items-center gap-2 flex-wrap mb-1">
+                <span class="badge badge-{{ a.recommendation }}">{{ a.recommendation }}</span>
+                <strong class="small">{{ a.symbol.split('.')[0] }}</strong>
+                <span class="badge badge-{{ a.sentiment }} ms-auto">{{ a.sentiment }}</span>
+                <span class="small text-secondary">{{ '%.0f'|format((a.confidence or 0) * 100) }}%</span>
+              </div>
+              <p class="small text-secondary mb-1">{{ a.summary or '' }}</p>
+              {% if a.key_positives %}
+              <div class="d-flex flex-wrap gap-1 mb-1">
+                {% for kp in a.key_positives %}
+                <span class="badge bg-success bg-opacity-25 text-success-emphasis small">✓ {{ kp }}</span>
+                {% endfor %}
+              </div>
+              {% endif %}
+              {% if a.key_risks %}
+              <div class="d-flex flex-wrap gap-1">
+                {% for kr in a.key_risks %}
+                <span class="badge bg-danger bg-opacity-25 text-danger-emphasis small">⚠ {{ kr }}</span>
+                {% endfor %}
+              </div>
+              {% endif %}
+              {% if a.suggested_entry_note and a.suggested_entry_note != 'N/A' %}
+              <div class="mt-1 small text-secondary">
+                <i class="bi bi-arrow-right-circle me-1"></i>{{ a.suggested_entry_note }}
+              </div>
+              {% endif %}
+            </div>
+          </div>
+          {% endfor %}
+        {% else %}
+          <div class="text-center text-secondary py-5">
+            <i class="bi bi-robot fs-1 d-block mb-2"></i>
+            No AI analyses yet. Run "Screen + AI" to generate.
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const toastEl  = document.getElementById('toast');
+const toastBody = document.getElementById('toast-body');
+const bsToast  = new bootstrap.Toast(toastEl, {delay: 4000});
+
+async function triggerRun(task) {
+  try {
+    const r = await fetch('/run/' + task, {method:'POST'});
+    const d = await r.json();
+    if (r.ok) {
+      toastEl.classList.remove('text-bg-danger');
+      toastEl.classList.add('text-bg-success');
+      toastBody.textContent = d.message || 'Pipeline started!';
+    } else {
+      toastEl.classList.remove('text-bg-success');
+      toastEl.classList.add('text-bg-danger');
+      toastBody.textContent = d.error || 'Error starting pipeline.';
+    }
+    bsToast.show();
+  } catch(e) {
+    toastBody.textContent = 'Request failed.';
+    bsToast.show();
+  }
+}
+</script>
+{% endblock %}

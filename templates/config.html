@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% set active = "config" %}
+
+{% block title %}Config — Nifty Pipeline{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-4">
+  <h5 class="mb-0 fw-semibold">Configuration</h5>
+  <a href="/" class="btn btn-outline-secondary btn-sm">
+    <i class="bi bi-arrow-left me-1"></i>Dashboard
+  </a>
+</div>
+
+{% if msg %}
+<div class="alert alert-{{ 'success' if msg[0] == 'success' else 'danger' }} alert-dismissible fade show" role="alert">
+  <i class="bi bi-{{ 'check-circle' if msg[0] == 'success' else 'exclamation-triangle' }} me-2"></i>
+  {{ msg[1] }}
+  <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}
+
+<div class="card mb-3">
+  <div class="card-header py-2 d-flex align-items-center gap-2">
+    <i class="bi bi-file-code text-secondary"></i>
+    <span class="fw-semibold small">config.yaml</span>
+    <span class="ms-auto small text-secondary">Edit carefully — saves immediately on submit</span>
+  </div>
+  <div class="card-body p-0">
+    <form method="POST" action="/config">
+      <textarea name="config_yaml" id="cfg-editor" class="form-control border-0 rounded-0"
+        style="font-family: 'SFMono-Regular', Consolas, monospace; font-size: .83rem;
+               min-height: 520px; background: #0d1117; color: #e6edf3; resize: vertical;"
+        spellcheck="false">{{ raw_yaml }}</textarea>
+      <div class="d-flex gap-2 p-3 border-top border-secondary border-opacity-25">
+        <button type="submit" class="btn btn-primary btn-sm">
+          <i class="bi bi-floppy me-1"></i>Save & Reload Scheduler
+        </button>
+        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="location.reload()">
+          <i class="bi bi-arrow-counterclockwise me-1"></i>Discard Changes
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ── Quick Reference ───────────────────────────────────────────────────── -->
+<div class="card">
+  <div class="card-header py-2">
+    <span class="fw-semibold small"><i class="bi bi-info-circle me-1 text-secondary"></i>Quick Reference</span>
+  </div>
+  <div class="card-body">
+    <div class="row g-3 small text-secondary">
+      <div class="col-md-4">
+        <strong class="text-light d-block mb-1">Data Source</strong>
+        <code>yfinance</code> — free, no key needed (testing)<br>
+        <code>alpha_vantage</code> — production, needs key
+      </div>
+      <div class="col-md-4">
+        <strong class="text-light d-block mb-1">Schedule format</strong>
+        Time in 24h <code>HH:MM</code>, timezone <code>Asia/Kolkata</code><br>
+        Tasks: <code>screen</code>, <code>news</code>, <code>ai_analysis</code>,
+        <code>earnings_dashboard</code>, <code>telegram_report</code>
+      </div>
+      <div class="col-md-4">
+        <strong class="text-light d-block mb-1">Telegram setup</strong>
+        1. Create bot via @BotFather → copy token<br>
+        2. Send a message to your bot<br>
+        3. Visit <code>getUpdates</code> API to find <code>chat_id</code>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

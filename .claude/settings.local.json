@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"d:\\\\SI\\\\nse_scheduler\\\\core\")",
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"d:\\\\SI\\\\nse_scheduler\\\\agents\")",
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"d:\\\\SI\\\\nse_scheduler\\\\templates\")",
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"d:\\\\SI\\\\nse_scheduler\\\\static\")",
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"d:\\\\SI\\\\nse_scheduler\\\\data\")",
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"d:\\\\SI\\\\nse_scheduler\\\\logs\")"
+    ]
+  }
+}

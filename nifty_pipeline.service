@@ -1,0 +1,18 @@
+[Unit]
+Description=Nifty Pipeline Trading Dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/nifty_pipeline
+# Uses the venv Python — run setup.sh to auto-generate the correct path
+ExecStart=/home/pi/nifty_pipeline/venv/bin/python /home/pi/nifty_pipeline/app.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

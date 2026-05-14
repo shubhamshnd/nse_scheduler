@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+{% set active = "earnings" %}
+
+{% block title %}Earnings — Nifty Pipeline{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-4">
+  <h5 class="mb-0 fw-semibold">Earnings Dashboard</h5>
+  <div class="d-flex gap-2">
+    <button class="btn btn-outline-secondary btn-sm" onclick="triggerRun('earnings')">
+      <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+    </button>
+    <button class="btn btn-outline-secondary btn-sm" onclick="triggerRun('telegram')">
+      <i class="bi bi-send me-1"></i>Send Alert
+    </button>
+  </div>
+</div>
+
+<!-- ── Toast ──────────────────────────────────────────────────────────────── -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index:1100">
+  <div id="toast" class="toast text-bg-success align-items-center" role="alert">
+    <div class="d-flex">
+      <div class="toast-body" id="toast-body">Started.</div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+    </div>
+  </div>
+</div>
+
+{% if not earnings %}
+<div class="card text-center py-5">
+  <div class="card-body text-secondary">
+    <i class="bi bi-calendar-x fs-1 d-block mb-2"></i>
+    No earnings data yet. Run the Earnings task from the Dashboard.
+  </div>
+</div>
+{% else %}
+
+<!-- ── Upcoming Earnings (within 30 days) ───────────────────────────────── -->
+{% set soon_list = earnings | selectattr('earnings_soon') | list %}
+{% if soon_list %}
+<div class="card mb-4 border-warning border-opacity-50">
+  <div class="card-header py-2">
+    <i class="bi bi-alarm me-1 text-warning"></i>
+    <span class="fw-semibold small text-warning">Upcoming Earnings (Next 30 Days)</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-sm table-hover mb-0">
+      <thead>
+        <tr>
+          <th>Symbol</th><th>Earnings Date</th>
+          <th>Beat Rate</th><th>Avg Surprise</th><th>Quarters tracked</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in soon_list %}
+        <tr class="table-warning table-warning-opacity">
+          <td class="fw-semibold">{{ e.symbol.split('.')[0] }}</td>
+          <td>{{ e.next_earnings or '—' }}</td>
+          <td>
+            {% if e.beat_rate_pct is not none %}
+              <span class="badge {% if e.beat_rate_pct >= 70 %}bg-success{% elif e.beat_rate_pct >= 50 %}bg-warning text-dark{% else %}bg-danger{% endif %}">
+                {{ '%.0f'|format(e.beat_rate_pct) }}%
+              </span>
+            {% else %}—{% endif %}
+          </td>
+          <td>
+            {% if e.avg_surprise_pct is not none %}
+              <span class="{% if e.avg_surprise_pct > 0 %}text-success{% else %}text-danger{% endif %}">
+                {{ '%+.1f'|format(e.avg_surprise_pct) }}%
+              </span>
+            {% else %}—{% endif %}
+          </td>
+          <td class="text-secondary">{{ e.quarters | length }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<!-- ── Full Earnings Table ──────────────────────────────────────────────── -->
+<div class="card mb-4">
+  <div class="card-header py-2">
+    <span class="fw-semibold small">
+      <i class="bi bi-table me-1 text-secondary"></i>All Stocks — Earnings History
+    </span>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-sm table-hover mb-0">
+      <thead>
+        <tr>
+          <th>Symbol</th><th>Next Earnings</th>
+          <th>Beat Rate</th><th>Avg Surprise</th><th>Detail</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in earnings %}
+        <tr>
+          <td class="fw-semibold">
+            {{ e.symbol.split('.')[0] }}
+            {% if e.earnings_soon %}
+            <span class="badge bg-warning text-dark ms-1" style="font-size:.65rem;">SOON</span>
+            {% endif %}
+          </td>
+          <td class="text-secondary small">{{ e.next_earnings or '—' }}</td>
+          <td>
+            {% if e.beat_rate_pct is not none %}
+              <span class="badge {% if e.beat_rate_pct >= 70 %}bg-success{% elif e.beat_rate_pct >= 50 %}bg-warning text-dark{% else %}bg-danger{% endif %}">
+                {{ '%.0f'|format(e.beat_rate_pct) }}%
+              </span>
+            {% else %}<span class="text-secondary">—</span>{% endif %}
+          </td>
+          <td>
+            {% if e.avg_surprise_pct is not none %}
+              <span class="{% if e.avg_surprise_pct > 0 %}text-success{% else %}text-danger{% endif %}">
+                {{ '%+.1f'|format(e.avg_surprise_pct) }}%
+              </span>
+            {% else %}<span class="text-secondary">—</span>{% endif %}
+          </td>
+          <td>
+            {% if e.quarters %}
+            <button class="btn btn-outline-secondary btn-sm py-0 px-2"
+                    style="font-size:.72rem;"
+                    data-bs-toggle="collapse"
+                    data-bs-target="#q-{{ loop.index }}">
+              {{ e.quarters | length }}Q
+            </button>
+            {% else %}
+            <span class="text-secondary small">—</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% if e.quarters %}
+        <tr class="collapse" id="q-{{ loop.index }}">
+          <td colspan="5" class="p-0">
+            <div class="p-3">
+              <table class="table table-sm mb-0" style="font-size:.8rem;">
+                <thead>
+                  <tr>
+                    <th>Quarter</th>
+                    <th>EPS Est.</th>
+                    <th>EPS Actual</th>
+                    <th>Surprise %</th>
+                    <th>Beat?</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for q in e.quarters %}
+                  <tr>
+                    <td class="text-secondary">{{ q.quarter }}</td>
+                    <td>{{ q.eps_estimate if q.eps_estimate is not none else '—' }}</td>
+                    <td class="fw-semibold">{{ q.eps_actual if q.eps_actual is not none else '—' }}</td>
+                    <td class="{% if q.surprise_pct is not none and q.surprise_pct > 0 %}text-success{% elif q.surprise_pct is not none %}text-danger{% endif %}">
+                      {% if q.surprise_pct is not none %}{{ '%+.1f'|format(q.surprise_pct) }}%{% else %}—{% endif %}
+                    </td>
+                    <td>
+                      {% if q.beat is not none %}
+                        {% if q.beat %}<span class="text-success">✓</span>{% else %}<span class="text-danger">✗</span>{% endif %}
+                      {% else %}—{% endif %}
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </td>
+        </tr>
+        {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+const toastEl  = document.getElementById('toast');
+const toastBody = document.getElementById('toast-body');
+const bsToast  = new bootstrap.Toast(toastEl, {delay: 3500});
+
+async function triggerRun(task) {
+  try {
+    const r = await fetch('/run/' + task, {method:'POST'});
+    const d = await r.json();
+    toastBody.textContent = r.ok ? (d.message || 'Started!') : (d.error || 'Error');
+    bsToast.show();
+  } catch(e) {
+    toastBody.textContent = 'Request failed.'; bsToast.show();
+  }
+}
+</script>
+{% endblock %}

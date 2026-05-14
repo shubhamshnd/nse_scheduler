@@ -1,0 +1,159 @@
+# ============================================================
+#  NIFTY PIPELINE — MASTER CONFIGURATION
+#  Edit this file to configure all pipeline behaviour.
+#  No code changes needed for normal operation.
+# ============================================================
+
+# ── API Keys ────────────────────────────────────────────────
+api_keys:
+  alpha_vantage: "YOUR_ALPHA_VANTAGE_KEY"
+  newsdata_io:   "YOUR_NEWSDATA_IO_KEY"
+  groq:          "YOUR_GROQ_API_KEY"
+  telegram_bot:  "YOUR_TELEGRAM_BOT_TOKEN"
+  telegram_chat: "YOUR_TELEGRAM_CHAT_ID"   # can be a personal chat or group id
+
+# ── Data Source Toggle ───────────────────────────────────────
+# "yfinance"       → free, no key needed, good for testing
+# "alpha_vantage"  → production, needs key above
+data_source: "yfinance"
+
+# ── Universe ─────────────────────────────────────────────────
+universe:
+  # How many top stocks (by score) to carry forward into news + AI analysis
+  shortlist_size: 20
+  # Minimum market cap in Crores INR (0 = no filter when using yfinance)
+  min_market_cap_cr: 500
+  # Nifty500 symbols — add/remove as needed (BSE suffix used for Alpha Vantage)
+  # For yfinance, use NSE suffix: RELIANCE.NS, TCS.NS etc.
+  # A starter list of 50 liquid Nifty500 names is pre-loaded below.
+  symbols_yfinance:
+    - "RELIANCE.NS"
+    - "TCS.NS"
+    - "HDFCBANK.NS"
+    - "INFY.NS"
+    - "ICICIBANK.NS"
+    - "HINDUNILVR.NS"
+    - "SBIN.NS"
+    - "BHARTIARTL.NS"
+    - "ITC.NS"
+    - "KOTAKBANK.NS"
+    - "LT.NS"
+    - "AXISBANK.NS"
+    - "ASIANPAINT.NS"
+    - "MARUTI.NS"
+    - "TITAN.NS"
+    - "BAJFINANCE.NS"
+    - "WIPRO.NS"
+    - "NESTLEIND.NS"
+    - "ULTRACEMCO.NS"
+    - "POWERGRID.NS"
+    - "NTPC.NS"
+    - "SUNPHARMA.NS"
+    - "ONGC.NS"
+    - "TECHM.NS"
+    - "HCLTECH.NS"
+    - "ADANIENT.NS"
+    - "ADANIPORTS.NS"
+    - "JSWSTEEL.NS"
+    - "TATASTEEL.NS"
+    - "TATAMOTORS.NS"
+    - "M&M.NS"
+    - "BAJAJFINSV.NS"
+    - "INDUSINDBK.NS"
+    - "DRREDDY.NS"
+    - "CIPLA.NS"
+    - "DIVISLAB.NS"
+    - "EICHERMOT.NS"
+    - "HEROMOTOCO.NS"
+    - "BPCL.NS"
+    - "COALINDIA.NS"
+    - "GRASIM.NS"
+    - "HINDALCO.NS"
+    - "BRITANNIA.NS"
+    - "DABUR.NS"
+    - "PIDILITIND.NS"
+    - "BERGEPAINT.NS"
+    - "MCDOWELL-N.NS"
+    - "TATACONSUM.NS"
+    - "GODREJCP.NS"
+    - "APOLLOHOSP.NS"
+
+  symbols_alpha_vantage:
+    - "RELIANCE.BSE"
+    - "TCS.BSE"
+    - "HDFCBANK.BSE"
+    - "INFY.BSE"
+    - "ICICIBANK.BSE"
+    - "HINDUNILVR.BSE"
+    - "SBIN.BSE"
+    - "BHARTIARTL.BSE"
+    - "ITC.BSE"
+    - "KOTAKBANK.BSE"
+
+# ── Screening Filters ────────────────────────────────────────
+screening:
+  momentum:
+    lookback_days: 252          # 12-month momentum window
+    exclude_recent_days: 21     # exclude last month (reversal effect)
+  technical:
+    adx_min: 20                 # trend strength threshold
+    rsi_min: 35
+    rsi_max: 72
+    ema_above_200: true         # only stocks above 200-day EMA
+  scoring_weights:
+    momentum_score: 0.40
+    rsi_score:      0.20
+    adx_score:      0.20
+    volume_score:   0.20        # OBV / volume trend
+
+# ── News Fetch ───────────────────────────────────────────────
+news:
+  # newsdata.io free: 200 credits/day, 10 articles/credit
+  # We batch symbols to stay within limit
+  max_credits_per_run: 30       # conservative — leaves buffer for other runs
+  articles_per_symbol: 5        # how many articles to fetch per stock
+  language: "en"
+  # Minimum sentiment confidence to include in report
+  sentiment_confidence_threshold: 0.55
+
+# ── Groq AI Agent ────────────────────────────────────────────
+groq:
+  model: "llama-3.3-70b-versatile"   # free tier model on Groq
+  max_tokens: 2048
+  temperature: 0.2               # low temp = more deterministic analysis
+
+# ── Schedule (24h format, Asia/Kolkata timezone) ─────────────
+schedule:
+  enabled: true
+  timezone: "Asia/Kolkata"
+  jobs:
+    - name: "morning_scan"
+      time: "08:30"
+      tasks: ["screen", "news", "ai_analysis", "telegram_report"]
+    - name: "earnings_check"
+      time: "09:15"
+      tasks: ["earnings_dashboard", "telegram_report"]
+    - name: "evening_review"
+      time: "16:30"
+      tasks: ["screen", "news", "ai_analysis", "telegram_report"]
+
+# ── Telegram Report ──────────────────────────────────────────
+telegram:
+  enabled: true
+  send_on_scan_complete: true
+  send_earnings_alerts: true
+  max_stocks_in_message: 10     # truncate if shortlist is long
+
+# ── Web Dashboard ────────────────────────────────────────────
+web:
+  host: "0.0.0.0"              # bind to all interfaces for LAN access on Pi
+  port: 5000
+  debug: false
+  secret_key: "change_this_to_a_random_string"
+
+# ── Logging ──────────────────────────────────────────────────
+logging:
+  level: "INFO"                 # DEBUG | INFO | WARNING | ERROR
+  file: "logs/pipeline.log"
+  max_bytes: 5242880            # 5 MB
+  backup_count: 3

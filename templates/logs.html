@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% set active = "logs" %}
+
+{% block title %}Logs — Nifty Pipeline{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-4">
+  <h5 class="mb-0 fw-semibold">Log Viewer</h5>
+  <div class="d-flex gap-2">
+    <button class="btn btn-outline-secondary btn-sm" id="scrollBtn" onclick="scrollToBottom()">
+      <i class="bi bi-arrow-down me-1"></i>Latest
+    </button>
+    <a href="/logs" class="btn btn-outline-secondary btn-sm">
+      <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+    </a>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header py-2 d-flex align-items-center gap-2">
+    <i class="bi bi-terminal text-secondary"></i>
+    <span class="small fw-semibold">pipeline.log</span>
+    <span class="ms-auto small text-secondary">Last {{ lines | length }} lines</span>
+  </div>
+  <div class="card-body p-0">
+    <div id="log-container"
+         style="max-height:70vh; overflow-y:auto; background:#010409; border-radius:0 0 .375rem .375rem; padding:1rem;">
+      {% if lines %}
+        {% for line in lines %}
+          {% set lvl = 'INFO' %}
+          {% if ' ERROR ' in line %}{% set lvl = 'ERROR' %}
+          {% elif ' WARNING ' in line %}{% set lvl = 'WARNING' %}
+          {% elif ' DEBUG ' in line %}{% set lvl = 'DEBUG' %}
+          {% endif %}
+          <pre class="log-line log-{{ lvl }}">{{ line | e }}</pre>
+        {% endfor %}
+      {% else %}
+        <div class="text-secondary text-center py-4">
+          <i class="bi bi-file-earmark-text fs-1 d-block mb-2"></i>
+          No log entries yet.
+        </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function scrollToBottom() {
+  const c = document.getElementById('log-container');
+  c.scrollTop = c.scrollHeight;
+}
+// Auto-scroll to bottom on load
+window.addEventListener('load', scrollToBottom);
+</script>
+{% endblock %}
