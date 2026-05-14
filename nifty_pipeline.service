@@ -5,10 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=pi
-WorkingDirectory=/home/pi/nifty_pipeline
-# Uses the venv Python — run setup.sh to auto-generate the correct path
-ExecStart=/home/pi/nifty_pipeline/venv/bin/python /home/pi/nifty_pipeline/app.py
+User=shubham
+WorkingDirectory=/home/shubham/nse_scheduler
+ExecStart=/home/shubham/nse_scheduler/venv/bin/python /home/shubham/nse_scheduler/app.py
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal
